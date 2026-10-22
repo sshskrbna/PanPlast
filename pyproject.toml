@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "panplast"
+dynamic = ["version"]
+description = "IR boundaries, junction genes and core / soft-core genes of chloroplast genomes, with figures, tables and an HTML report"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Alexandra Skryabina"}]
+keywords = ["chloroplast", "plastome", "inverted repeat", "IRscope", "pan-genome", "core genes", "GeSeq", "bioinformatics"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = [
+    "biopython>=1.79",
+    "pandas>=1.5",
+    "numpy>=1.22",
+    "matplotlib>=3.6",
+    "openpyxl>=3.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+panplast = "panplast.cli:main"
+
+[tool.setuptools]
+packages = ["panplast"]
+
+[tool.setuptools.dynamic]
+version = {attr = "panplast.__version__"}

@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+# pipeline output
+panplast_results/
+results*/
+*.xlsx
+!docs/**
+example_results*/
+.claude/

@@ -1,0 +1,15 @@
+# conda env create -f environment.yml && conda activate panplast && pip install -e .
+name: panplast
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.9
+  - biopython>=1.79
+  - pandas>=1.5
+  - numpy>=1.22
+  - matplotlib>=3.6
+  - openpyxl>=3.0
+  - blast>=2.10
+  - pytest
+  - pip
