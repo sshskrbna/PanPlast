@@ -31,6 +31,7 @@ TEXT = {
     "qc_lsc_rev": "LSC reverse-complemented (psbA at JLB instead of JLA)",
     "qc_ssc_rev": "SSC reverse-complemented (ndhF at JSA instead of JSB)",
     "log_gb": "GenBank: {n} files",
+    "log_dup_id": "  {f}: id {g} is already used by another genome, renamed to {n}",
     "log_fa": "FASTA: {n} files, without annotation: {k}",
     "log_annot": "Annotating {n} FASTA ({how}) with {r} references",
     "log_lib": "  reference library: {n} gene sequences from {r} GenBank files",

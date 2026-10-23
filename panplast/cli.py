@@ -75,6 +75,24 @@ def _label_from_name(stem: str, acc: str | None) -> str:
     return s.strip("_ .-").replace("_", " ")
 
 
+def _organism_label(org: str, gid: str, stem: str) -> str:
+    """The /organism of a record, or the file name when it is missing, a bare '.', an accession or the id."""
+    org = org.strip()
+    if org.strip(" .") and accession_of(org) is None and org != gid:
+        return org
+    return _label_from_name(stem, gid)
+
+
+def _unique_id(gid: str, taken) -> str:
+    """gid, or gid_2, gid_3, ... when another genome already uses it."""
+    if gid not in taken:
+        return gid
+    k = 2
+    while f"{gid}_{k}" in taken:
+        k += 1
+    return f"{gid}_{k}"
+
+
 def load_meta(path):
     if not path:
         return {}
@@ -112,10 +130,13 @@ def main(argv=None):
     for f in gb_files:
         rec = read_genbank(f)
         gid = accession_of(f.name) or accession_of(rec.id) or rec.id
+        uid = _unique_id(gid, records)
+        if uid != gid:
+            log(t("log_dup_id", f=f.name, g=gid, n=uid))
+        gid = uid
         records[gid] = rec
         source[gid] = "GenBank: " + f.name
-        org = rec.annotations.get("organism", "")
-        labels[gid] = org if org and accession_of(org) is None and org != gid else _label_from_name(f.stem, gid)
+        labels[gid] = _organism_label(rec.annotations.get("organism", ""), gid, f.stem)
     log(t("log_gb", n=len(gb_files)))
 
     fa_files = find_files(a.fasta, FA_EXT)
@@ -137,6 +158,11 @@ def main(argv=None):
         for p in annotate_fastas(to_annotate, refs, out / "annotated_genbank", a.synonyms, a.pga, log):
             rec = read_genbank(p)
             gid = accession_of(p.name) or rec.id
+            uid = _unique_id(gid, records)
+            if uid != gid:
+                log(t("log_dup_id", f=p.name, g=gid, n=uid))
+                labels.setdefault(uid, labels.get(gid, ""))
+            gid = uid
             records[gid] = rec
             source[gid] = f"PanPlast {how}" if not a.pga else "PGA"
     if not records:

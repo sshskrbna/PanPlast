@@ -12,8 +12,10 @@ from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
 from panplast import analysis
-from panplast.genes import dedupe, extract_loci, genes_from_record, load_synonyms, read_genbank, resolve_name
-from panplast.ir import detect_quadripartite
+from panplast.annotate import transfer_annotate
+from panplast.cli import _organism_label, _unique_id
+from panplast.genes import Locus, dedupe, extract_loci, genes_from_record, load_synonyms, read_genbank, resolve_name
+from panplast.ir import Quadripartite, detect_quadripartite
 
 HAVE_BLAST = shutil.which("blastn") is not None
 SYN = load_synonyms(None)
@@ -129,6 +131,88 @@ class TestCategories(unittest.TestCase):
         self.assertEqual(c["minus_one"], "soft-core")   # 19/20 = 95 %
         self.assertEqual(c["quarter"], "shell")
         self.assertEqual(c["one"], "cloud")
+
+
+def rps12_pair():
+    """Two trans-spliced rps12 loci: shared exon 1 in the LSC, exons 2-3 in IRb / IRa."""
+    def mk(a, b):
+        return Locus("rps12", "rps12", "CDS", 1000, b + 30, -1,
+                     [(1000, 1114), (a, a + 232), (b, b + 30)], flags={"trans_spliced"})
+    return [mk(90000, 95000), mk(120000, 125000)]
+
+
+class TestTransSplicedCopies(unittest.TestCase):
+    def test_two_rps12_copies_counted(self):
+        m = analysis.presence_matrix({"g": rps12_pair()})
+        self.assertEqual(m.at["rps12", "g"], 2)
+
+    def test_duplicate_rps12_record_not_double_counted(self):
+        a, _ = rps12_pair()
+        m = analysis.presence_matrix({"g": [a, a]})
+        self.assertEqual(m.at["rps12", "g"], 1)
+
+    def test_split_pieces_of_one_gene_still_merged(self):
+        pieces = [Locus("ndhA", "ndhA", "CDS", 5000, 5500, 1, [(5000, 5500)]),
+                  Locus("ndhA", "ndhA", "CDS", 6000, 6500, 1, [(6000, 6500)])]
+        m = analysis.presence_matrix({"g": pieces})
+        self.assertEqual(m.at["ndhA", "g"], 1)
+
+    def test_rps12_duplicated_in_ir_in_summary(self):
+        q = Quadripartite(150000, {"LSC": (0, 80000), "IRb": (80000, 100000),
+                                   "SSC": (100000, 110000), "IRa": (110000, 130000)}, {})
+        row = analysis.genome_summary("g", "x", "A" * 150000, rps12_pair(), q, None, "test")
+        self.assertEqual(row["duplicated_in_IR"], 1)
+
+
+@unittest.skipUnless(HAVE_BLAST, "blastn not on PATH")
+class TestTransferAnnotate(unittest.TestCase):
+    def test_trans_spliced_gene_gets_one_feature_per_ir_copy(self):
+        e1, e2, e3 = random_seq(100, 11), random_seq(200, 12), random_seq(80, 13)
+        filler = [random_seq(n, 20 + n) for n in (200, 600, 300, 600, 300, 600)]
+        # exon 1 once (LSC), exons 2-3 in each of the two IR copies
+        target = (filler[0] + e1 + filler[1] + e2 + filler[2] + e3 + filler[3] + e2 + filler[4] + e3 + filler[5])
+        # the reference has both copies, so every part is in the library twice
+        lib = [(f"ref|{i}p{j}|rps12", "rps12", "CDS", s) for i in (0, 1) for j, s in ((1, e1), (2, e2), (3, e3))]
+        rec = transfer_annotate(SeqRecord(Seq(target), id="T"), lib)
+        genes = [f for f in rec.features if f.type == "gene" and f.qualifiers["gene"] == ["rps12"]]
+        self.assertEqual(len(genes), 2)
+        for g in genes:
+            self.assertEqual(len(g.location.parts), 3)
+        starts = sorted(int(p.start) for g in genes for p in g.location.parts)
+        self.assertEqual(starts.count(len(filler[0])), 2)   # exon 1 is shared by both copies
+        self.assertEqual(len(set(starts)), 5)               # 1 shared + 2 exons in each of the two IR copies
+
+
+class TestLabelsAndIds(unittest.TestCase):
+    def test_placeholder_organism_falls_back_to_file_name(self):
+        for org in (".", " . ", "", "NC_000001.1"):
+            self.assertEqual(_organism_label(org, "NC_000001.1", "NC_000001.1_Oryza_sativa"), "Oryza sativa")
+
+    def test_real_organism_kept(self):
+        self.assertEqual(_organism_label("Oryza sativa", "NC_000001.1", "NC_000001.1_x"), "Oryza sativa")
+
+    def test_unique_id(self):
+        self.assertEqual(_unique_id("A", {}), "A")
+        self.assertEqual(_unique_id("A", {"A": 1}), "A_2")
+        self.assertEqual(_unique_id("A", {"A": 1, "A_2": 1}), "A_3")
+
+
+@unittest.skipUnless(HAVE_BLAST, "blastn not on PATH")
+class TestDuplicateAccession(unittest.TestCase):
+    def test_both_genomes_kept(self):
+        from panplast.cli import main
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            for k, tag in enumerate(("Alpha", "Beta")):
+                seq, (lsc, ir, ssc) = synthetic_plastome(seed=k + 1, ir=6000)
+                rec = SeqRecord(Seq(seq), id="NC_000001.1", annotations={"molecule_type": "DNA", "topology": "circular"})
+                rec.features = gene(500, 1562, "psbA", strand=-1) + gene(3000, 4434, "rbcL")
+                SeqIO.write(rec, td / f"NC_000001.1_{tag}.gb", "genbank")
+            out = td / "res"
+            main(["--genbank", str(td), "--out", str(out), "--maps", "0"])
+            summary = pd.read_csv(out / "tables" / "summary.tsv", sep="\t")
+            self.assertEqual(sorted(summary.genome), ["NC_000001.1", "NC_000001.1_2"])
+            self.assertNotIn(".", set(summary.species))   # no '.' placeholder from the empty /organism
 
 
 @unittest.skipUnless(HAVE_BLAST, "blastn not on PATH")

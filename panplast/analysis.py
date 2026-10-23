@@ -61,7 +61,8 @@ def genome_summary(gid, label, seq, loci, q: Quadripartite | None, q_gb: Quadrip
     dup = set()
     if q:
         for x in counted:
-            if q.region_of(x.start) in ("IRa", "IRb") and sum(y.name == x.name for y in counted) >= 2:
+            in_ir = any(q.region_of(s) in ("IRa", "IRb") for s, _ in x.parts)
+            if in_ir and sum(y.name == x.name for y in counted) >= 2:
                 dup.add(x.name)
     n_bp = seq.upper().count("N")
     row = dict(genome=gid, species=label, source=src, length_bp=len(seq), GC_total=round(gc(seq), 2),
@@ -87,12 +88,22 @@ def presence_matrix(loci_by_genome: dict[str, list[Locus]]) -> pd.DataFrame:
     counts = {}
     for g, loci in loci_by_genome.items():
         last_end = {}
+        anchors = {}
         for x in sorted((x for x in loci if x.counted), key=lambda x: x.start):
             key = (x.name, x.strand)
-            if key in last_end and x.start - last_end[key] < 3000:
+            if "trans_spliced" in x.flags:
+                # the span of such a gene is meaningless (shared exon 1 in the LSC, other exons
+                # in IRa or IRb): tell the copies apart by their last exon, which lies in the IR
+                anchor = x.parts[-1][0]
+                seen = anchors.setdefault(key, [])
+                if any(abs(anchor - a) < 3000 for a in seen):
+                    continue
+                seen.append(anchor)
+            elif key in last_end and x.start - last_end[key] < 3000:
                 last_end[key] = max(last_end[key], x.end)
                 continue   # piece of the same copy (split exons etc.)
-            last_end[key] = x.end
+            else:
+                last_end[key] = x.end
             counts.setdefault(x.name, {}).setdefault(g, 0)
             counts[x.name][g] += 1
     m = pd.DataFrame(counts).T.reindex(columns=genomes).fillna(0).astype(int)

@@ -10,6 +10,7 @@ Two back-ends:
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -75,9 +76,10 @@ def transfer_annotate(fasta_rec: SeqRecord, lib, min_cov=0.6, min_ident=75.0) ->
         if s0 > L:   # hit fully in the wrap copy -> duplicate of an earlier one
             continue
         name, gtype = meta[qid]
-        part = "p" in qid.split("|")[1]
+        m = re.search(r"p(\d+)$", qid.split("|")[1])
         hits.append(dict(name=name, gtype=gtype, s=s0 - 1, e=s1, strand=strand, pid=float(pid),
-                         cov=cov, bits=float(bits), ref=qid.split("|")[0], part=part))
+                         cov=cov, bits=float(bits), ref=qid.split("|")[0],
+                         part=m is not None, part_idx=int(m.group(1)) if m else 0))
     # best hit per locus: greedy by bitscore, one per overlapping region per gene name
     hits.sort(key=lambda h: -h["bits"])
     placed = []
@@ -99,16 +101,32 @@ def transfer_annotate(fasta_rec: SeqRecord, lib, min_cov=0.6, min_ident=75.0) ->
             continue
         feats.extend(_feature(h, L))
     for name, parts in by_name.items():
-        locs = [FeatureLocation(p["s"] % L, min(p["e"], L), strand=p["strand"]) for p in parts]
-        loc = locs[0] if len(locs) == 1 else CompoundLocation(locs)
-        note = f"transferred by blastn from {parts[0]['ref']}; trans-spliced parts"
-        feats.append(SeqFeature(loc, type="gene", qualifiers={"gene": [name], "annotator": ["panplast-blast"], "note": [note]}))
-        feats.append(SeqFeature(loc, type=parts[0]["gtype"], qualifiers={"gene": [name]}))
+        for copy in _split_copies(parts):
+            locs = [FeatureLocation(p["s"] % L, min(p["e"], L), strand=p["strand"]) for p in copy]
+            locs.sort(key=lambda x: int(x.start), reverse=copy[0]["strand"] == -1)   # biological order
+            loc = locs[0] if len(locs) == 1 else CompoundLocation(locs)
+            note = f"transferred by blastn from {copy[0]['ref']}; trans-spliced parts"
+            feats.append(SeqFeature(loc, type="gene", qualifiers={"gene": [name], "annotator": ["panplast-blast"], "note": [note]}))
+            feats.append(SeqFeature(loc, type=copy[0]["gtype"], qualifiers={"gene": [name]}))
     rec = SeqRecord(Seq(str(fasta_rec.seq)), id=fasta_rec.id, name=fasta_rec.id[:16],
                     description=fasta_rec.description,
                     annotations={"molecule_type": "DNA", "topology": "circular"})
     rec.features = sorted(feats, key=lambda f: int(f.location.start))
     return rec
+
+
+def _split_copies(parts):
+    """Placed parts of one trans-spliced gene -> one list of parts per gene copy.
+
+    A part found once (exon 1 in the LSC) is shared by all copies; a part found
+    once per IR is taken in genome order, so IRb and IRa each get their own exons."""
+    by_idx = {}
+    for p in parts:
+        by_idx.setdefault(p["part_idx"], []).append(p)
+    for v in by_idx.values():
+        v.sort(key=lambda p: p["s"])
+    n = max(len(v) for v in by_idx.values())
+    return [[v[k] if k < len(v) else v[-1] for _, v in sorted(by_idx.items())] for k in range(n)]
 
 
 def _feature(h, L):
