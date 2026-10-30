@@ -59,13 +59,13 @@ open results/report.html        # Linux: xdg-open results/report.html
 
 | | |
 |---|---|
-| 🧭 **IR boundaries from the sequence itself** | LSC / IRb / SSC / IRa come from self-BLAST of the inverted repeat, which also works when the IR spans the start of the sequence. Boundaries in the GenBank file are only used for comparison. |
-| 📍 **Junction genes** | Genes crossing or flanking JLB, JSB, JSA and JLA, with the number of bp on each side, as a table and as an IRscope-style figure. |
-| 🧬 **Core / soft-core genes** | Presence and copy-number matrix, core / soft-core / shell / cloud categories with adjustable thresholds, frequency spectrum, accumulation curves. |
-| 🧹 **Clean gene names** | Synonyms, ambiguous GeSeq names, misread tRNA anticodons, fragments and gene remnants are resolved, so that one gene means one row. |
-| 🧪 **Raw FASTA too** | Genomes without annotation are annotated by transferring genes from reference GenBank files (blastn), or with PGA. |
-| 🚦 **Quality control** | Flags draft assemblies (N content), reverse-complemented LSC/SSC, missing genes, and IR boundaries that disagree with the annotation. |
-| 📊 **Ready to publish** | PNG, PDF and SVG figures with editable text, an Excel workbook, TSV tables, and a self-contained HTML report with sortable tables. |
+| **IR boundaries from the sequence itself** | LSC / IRb / SSC / IRa come from self-BLAST of the inverted repeat, which also works when the IR spans the start of the sequence. Boundaries in the GenBank file are only used for comparison. |
+| **Junction genes** | Genes crossing or flanking JLB, JSB, JSA and JLA, with the number of bp on each side, as a table and as an IRscope-style figure. |
+| **Core / soft-core genes** | Presence and copy-number matrix, core / soft-core / shell / cloud categories with adjustable thresholds, frequency spectrum, accumulation curves. |
+| **Clean gene names** | Synonyms, ambiguous GeSeq names, misread tRNA anticodons, fragments and gene remnants are resolved, so that one gene means one row. |
+| **Raw FASTA too** | Genomes without annotation are annotated by transferring genes from reference GenBank files (blastn), or with PGA. |
+| **Quality control** | Flags draft assemblies (N content), reverse-complemented LSC/SSC, missing genes, and IR boundaries that disagree with the annotation. |
+| **Ready to publish** | PNG, PDF and SVG figures with editable text, an Excel workbook, TSV tables, and a self-contained HTML report with sortable tables. |
 
 ## Installation
 
