@@ -164,7 +164,7 @@ def region_lengths_plot(order, labels, summary, path_base):
 # --------------------------------------------------------------------------- gene matrix
 def gene_heatmap(matrix, cats, order, labels, path_base, only_variable=False):
     cat_of = dict(zip(cats.gene, cats.category.astype(str)))
-    genes = [g for g in cats.gene if (not only_variable or cat_of[g] != "core")]
+    genes = [g for g in cats.gene if not only_variable or matrix.loc[g, order].nunique() > 1]
     if not genes:
         return None
     m = matrix.loc[genes, order].clip(upper=3).values

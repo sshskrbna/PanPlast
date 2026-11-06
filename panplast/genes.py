@@ -250,7 +250,7 @@ def extract_loci(record, syn: dict[str, str]) -> list[Locus]:
             loc = make(match or g, match.type if match else None, _qual(g, "info"))
             if loc is None:
                 continue
-            if match is not None and "pseudo" in g.qualifiers:
+            if match is not None and ("pseudo" in g.qualifiers or "pseudogene" in g.qualifiers):
                 loc.flags.add("pseudo")
             if not loc.annotator:
                 loc.annotator = _qual(g, "annotator")

@@ -88,17 +88,20 @@ def presence_matrix(loci_by_genome: dict[str, list[Locus]]) -> pd.DataFrame:
     counts = {}
     for g, loci in loci_by_genome.items():
         last_end = {}
-        anchors = {}
+        spliced_copies = {}
         for x in sorted((x for x in loci if x.counted), key=lambda x: x.start):
             key = (x.name, x.strand)
             if "trans_spliced" in x.flags:
-                # the span of such a gene is meaningless (shared exon 1 in the LSC, other exons
-                # in IRa or IRb): tell the copies apart by their last exon, which lies in the IR
-                anchor = x.parts[-1][0]
-                seen = anchors.setdefault(key, [])
-                if any(abs(anchor - a) < 3000 for a in seen):
+                # Compare every exon: the shared LSC exon can occur anywhere in
+                # coordinate order after rotating a circular genome.
+                parts = sorted(x.parts)
+                seen = spliced_copies.setdefault(key, [])
+                if any(len(parts) == len(previous) and all(
+                    min(b, d) - max(a, c) >= 0.5 * max(b - a, d - c)
+                    for (a, b), (c, d) in zip(parts, previous)
+                ) for previous in seen):
                     continue
-                seen.append(anchor)
+                seen.append(parts)
             elif key in last_end and x.start - last_end[key] < 3000:
                 last_end[key] = max(last_end[key], x.end)
                 continue   # piece of the same copy (split exons etc.)
@@ -166,7 +169,11 @@ def gene_lengths(loci_by_genome) -> pd.DataFrame:
                              start=x.start + 1, end=x.end, strand="+" if x.strand == 1 else "−",
                              length=x.length, counted=x.counted, flags=",".join(sorted(x.flags)),
                              candidates=" | ".join(x.candidates), annotator=x.annotator))
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=["genome", "gene", "raw_name", "type", "start", "end", "strand",
+                                      "length", "counted", "flags", "candidates", "annotator"])
+    if df.empty:
+        df["median_len_all_genomes"] = pd.Series(dtype=float)
+        return df
     med = df[df.counted].groupby("gene")["length"].median()
     df["median_len_all_genomes"] = df["gene"].map(med)
     short = df.counted & (df["length"] < 0.6 * df["median_len_all_genomes"]) & (df["type"] == "CDS")

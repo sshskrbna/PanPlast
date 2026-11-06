@@ -23,6 +23,7 @@ TEXT = {
     "lvl_check": "check",
     "lvl_note": "note",
     "qc_no_ir": "inverted repeat not found",
+    "qc_no_genes": "no gene loci extracted; check the input annotation or reference-transfer matches",
     "qc_no_gb_regions": "GenBank has no valid LSC/IR/SSC annotation; self-BLAST used",
     "qc_ir_diff": "self-BLAST and GenBank boundaries differ: {d}",
     "qc_n": "{p:.1f} % N in sequence: draft assembly, genes inside gaps cannot be found",

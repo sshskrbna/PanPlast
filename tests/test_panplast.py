@@ -4,15 +4,16 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 from Bio import SeqIO
 from Bio.Seq import Seq
-from Bio.SeqFeature import FeatureLocation, SeqFeature
+from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from panplast import analysis
-from panplast.annotate import transfer_annotate
+from panplast import analysis, plots
+from panplast.annotate import annotate_fastas, transfer_annotate, _run_pga
 from panplast.cli import _organism_label, _unique_id
 from panplast.genes import Locus, dedupe, extract_loci, genes_from_record, load_synonyms, read_genbank, resolve_name
 from panplast.ir import Quadripartite, detect_quadripartite
@@ -39,6 +40,16 @@ def gene(start, end, name, ftype="CDS", strand=1, **qual):
 
 
 class TestNames(unittest.TestCase):
+    def test_parent_pseudogene_qualifiers_are_preserved(self):
+        for qualifier in ("pseudo", "pseudogene"):
+            with self.subTest(qualifier=qualifier):
+                rec = SeqRecord(Seq("A" * 2000), id="X")
+                rec.features = gene(100, 1534, "rbcL", **{qualifier: "unknown"})
+                loc = genes_from_record(rec, SYN)[0]
+                self.assertIn("pseudo", loc.flags)
+                self.assertFalse(loc.counted)
+                self.assertTrue(genes_from_record(rec, SYN, include_pseudo=True)[0].counted)
+
     def test_synonyms(self):
         self.assertEqual(resolve_name("pafI", "CDS", SYN)[0], "ycf3")
         self.assertEqual(resolve_name("pbf1", "CDS", SYN)[0], "psbN")
@@ -142,6 +153,21 @@ def rps12_pair():
 
 
 class TestTransSplicedCopies(unittest.TestCase):
+    def test_shared_exon_at_any_coordinate_keeps_two_copies(self):
+        # Rotate the same plastome so the shared exon is first, middle or last.
+        for shift in (0, 40000, 120000):
+            with self.subTest(shift=shift):
+                rec = SeqRecord(Seq("A" * 150000), id="X")
+                for copy in rps12_pair():
+                    parts = [FeatureLocation((a + shift) % 150000, (b + shift) % 150000, strand=copy.strand)
+                             for a, b in copy.parts]
+                    loc = CompoundLocation(parts)
+                    for kind in ("gene", "CDS"):
+                        rec.features.append(SeqFeature(loc, type=kind, qualifiers={"gene": ["rps12"]}))
+                loci = genes_from_record(rec, SYN)
+                self.assertEqual(len(loci), 2)
+                self.assertEqual(analysis.presence_matrix({"g": loci}).at["rps12", "g"], 2)
+
     def test_two_rps12_copies_counted(self):
         m = analysis.presence_matrix({"g": rps12_pair()})
         self.assertEqual(m.at["rps12", "g"], 2)
@@ -166,6 +192,34 @@ class TestTransSplicedCopies(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_BLAST, "blastn not on PATH")
 class TestTransferAnnotate(unittest.TestCase):
+    def test_same_fasta_basename_preserves_both_genomes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ref = SeqRecord(Seq(random_seq(3000, 1)), id="ref", annotations={"molecule_type": "DNA"})
+            ref.features = gene(100, 1534, "rbcL")
+            refpath = root / "ref.gb"
+            SeqIO.write(ref, refpath, "genbank")
+            fastas = []
+            expected = {}
+            # Also exercise a basename that collides with an allocated suffix.
+            for i, stem in enumerate(("sample", "sample", "sample_2")):
+                folder = root / str(i)
+                folder.mkdir()
+                fa = folder / f"{stem}.fa"
+                seq = ref.seq + Seq(random_seq(100, i + 10))
+                rec = SeqRecord(seq, id=f"genome{i}")
+                SeqIO.write(rec, fa, "fasta")
+                fastas.append(fa)
+                expected[rec.id] = str(seq)
+            paths = annotate_fastas(fastas, [refpath], root / "annotated", log=lambda _: None)
+            self.assertEqual(len(set(paths)), 3)
+            actual = {}
+            for path in paths:
+                rec = read_genbank(path)
+                actual[rec.id] = str(rec.seq)
+                self.assertTrue(any(f.type == "CDS" for f in rec.features))
+            self.assertEqual(actual, expected)
+
     def test_trans_spliced_gene_gets_one_feature_per_ir_copy(self):
         e1, e2, e3 = random_seq(100, 11), random_seq(200, 12), random_seq(80, 13)
         filler = [random_seq(n, 20 + n) for n in (200, 600, 300, 600, 300, 600)]
@@ -197,6 +251,53 @@ class TestLabelsAndIds(unittest.TestCase):
         self.assertEqual(_unique_id("A", {"A": 1, "A_2": 1}), "A_3")
 
 
+class TestReviewRegressions(unittest.TestCase):
+    def test_empty_gene_table_retains_schema(self):
+        table = analysis.gene_lengths({"g": []})
+        self.assertTrue(table.empty)
+        self.assertTrue({"genome", "gene", "counted", "flags", "median_len_all_genomes"} <= set(table.columns))
+
+    def test_variable_heatmap_includes_core_copy_number_changes(self):
+        matrix = pd.DataFrame({"g1": [1, 1, 0], "g2": [2, 1, 1]},
+                              index=["rps19", "rbcL", "infA"])
+        # Even when the relaxed threshold calls every gene core, retain variation.
+        cats = analysis.categorize(matrix, core=0.5)
+        with patch("panplast.plots._save") as save:
+            plots.gene_heatmap(matrix, cats, list(matrix.columns), {}, "unused", only_variable=True)
+            save.assert_called_once()
+            fig = save.call_args.args[0]
+            try:
+                shown = {label.get_text() for label in fig.axes[0].get_yticklabels()}
+                self.assertEqual(shown, {"rps19", "infA"})
+            finally:
+                plots.plt.close(fig)
+        self.assertIsNone(plots.gene_heatmap(matrix.loc[["rbcL"]],
+                                           analysis.categorize(matrix.loc[["rbcL"]]),
+                                           list(matrix.columns), {}, "unused", only_variable=True))
+
+    def test_pga_staging_preserves_duplicate_basenames(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            fastas, refs = [], []
+            for i in range(2):
+                folder = root / str(i)
+                folder.mkdir()
+                fa, ref = folder / "sample.fa", folder / "ref.gb"
+                fa.write_text(f">g{i}\nACGT\n")
+                ref.write_text(f"reference {i}")
+                fastas.append(fa)
+                refs.append(ref)
+
+            def inspect_staging(cmd, **kwargs):
+                rdir = Path(cmd[cmd.index("-r") + 1])
+                tdir = Path(cmd[cmd.index("-t") + 1])
+                self.assertEqual({p.read_text() for p in rdir.iterdir()}, {p.read_text() for p in refs})
+                self.assertEqual({p.read_text() for p in tdir.iterdir()}, {p.read_text() for p in fastas})
+
+            with patch("panplast.annotate.subprocess.run", side_effect=inspect_staging):
+                _run_pga(fastas, refs, root / "out", "PGA.pl", log=lambda _: None)
+
+
 @unittest.skipUnless(HAVE_BLAST, "blastn not on PATH")
 class TestDuplicateAccession(unittest.TestCase):
     def test_both_genomes_kept(self):
@@ -217,6 +318,23 @@ class TestDuplicateAccession(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_BLAST, "blastn not on PATH")
 class TestEndToEnd(unittest.TestCase):
+    def test_unannotated_genbank_produces_report_and_qc(self):
+        from panplast.cli import main
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            rec = SeqRecord(Seq(random_seq(12000, 1)), id="empty",
+                            annotations={"molecule_type": "DNA"})
+            path = root / "empty.gb"
+            SeqIO.write(rec, path, "genbank")
+            out = root / "res"
+            main(["--genbank", str(path), "--ir-source", "genbank", "--maps", "0", "--out", str(out)])
+            self.assertTrue((out / "report.html").exists())
+            self.assertTrue(pd.read_csv(out / "tables" / "genes_all.tsv", sep="\t").empty)
+            self.assertTrue(pd.read_csv(out / "tables" / "categories.tsv", sep="\t").empty)
+            qc = pd.read_csv(out / "tables" / "qc.tsv", sep="\t")
+            self.assertIn("error", set(qc.level))
+            self.assertTrue(qc.issue.str.contains("no gene loci extracted").any())
+
     def test_pipeline(self):
         from panplast.cli import main
         with tempfile.TemporaryDirectory() as td:

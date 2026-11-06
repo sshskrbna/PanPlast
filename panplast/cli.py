@@ -231,6 +231,8 @@ def main(argv=None):
     soft_set = set(cats.gene[cats.percent >= 100 * a.soft_core])
     for g in order:
         q, qg = quads[g], quads_gb[g]
+        if not loci_by[g]:
+            flag(g, "lvl_error", t("qc_no_genes"))
         if not q:
             flag(g, "lvl_error", t("qc_no_ir"))
         if qg is None:

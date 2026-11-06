@@ -141,6 +141,19 @@ def _feature(h, L):
             SeqFeature(loc, type=h["gtype"], qualifiers={"gene": [h["name"]]})]
 
 
+def _unique_stems(paths):
+    """Assign distinct file stems within one batch, including existing suffixes."""
+    used = set()
+    for path in paths:
+        stem = path.stem
+        suffix = 2
+        while stem in used:
+            stem = f"{path.stem}_{suffix}"
+            suffix += 1
+        used.add(stem)
+        yield path, stem
+
+
 def annotate_fastas(fastas: list[Path], refs: list[Path], outdir: Path, syn_path=None,
                     pga: str | None = None, log=print) -> list[Path]:
     outdir.mkdir(parents=True, exist_ok=True)
@@ -150,11 +163,11 @@ def annotate_fastas(fastas: list[Path], refs: list[Path], outdir: Path, syn_path
     lib = build_reference_library(refs, syn)
     log(t("log_lib", n=len(lib), r=len(refs)))
     out = []
-    for fa in fastas:
+    for fa, stem in _unique_stems(fastas):
         rec = SeqIO.read(fa, "fasta")
         ann = transfer_annotate(rec, lib)
         flat = ann.features
-        path = outdir / f"{fa.stem}.gb"
+        path = outdir / f"{stem}.gb"
         SeqIO.write(ann, path, "genbank")
         out.append(path)
         log(t("log_transferred", f=fa.name, n=sum(f.type == "gene" for f in flat)))
@@ -167,10 +180,10 @@ def _run_pga(fastas, refs, outdir, pga, log):
         rdir, tdir = Path(td) / "ref", Path(td) / "target"
         rdir.mkdir()
         tdir.mkdir()
-        for r in refs:
-            (rdir / r.name).write_bytes(r.read_bytes())
-        for f in fastas:
-            (tdir / f"{f.stem}.fasta").write_bytes(f.read_bytes())
+        for r, stem in _unique_stems(refs):
+            (rdir / f"{stem}{r.suffix}").write_bytes(r.read_bytes())
+        for f, stem in _unique_stems(fastas):
+            (tdir / f"{stem}.fasta").write_bytes(f.read_bytes())
         cmd = ["perl", pga, "-r", str(rdir), "-t", str(tdir), "-o", str(outdir)]
         log("  " + " ".join(cmd))
         subprocess.run(cmd, check=True)
