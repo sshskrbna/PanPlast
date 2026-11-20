@@ -42,17 +42,6 @@
 
 <p align="center"><sub>Real output for 49 Pooideae plastomes annotated with GeSeq.</sub></p>
 
-<p align="center"><b>IQ-TREE phylogeny with gene absence, copy numbers and genome lengths</b></p>
-
-<p align="center">
-  <a href="docs/img/phylogeny_example.png"><img src="docs/img/phylogeny_example.png" alt="Carex phylogeny aligned with IRb and genome lengths and a gene copy-number heatmap" width="100%"></a>
-</p>
-
-<p align="center"><sub>Example using eight selected Carex plastomes, with the input tree pruned for this preview.
-Red: no counted copy under the current annotation filters; blue: one or more counted copies.
-Red cells can include partial or fragmented loci and do not establish an evolutionary loss.
-Click the image for full resolution.</sub></p>
-
 ## Quick start
 
 ```bash
@@ -330,20 +319,6 @@ phylogeny and missing genes
 ```
 
 ### IQ-TREE phylogeny and missing genes
-
-<details>
-<summary><b>View the full Carex example: 85 tree tips and 33 matched plastomes</b></summary>
-
-![Full IQ-TREE gene-content overlay for Carex](docs/img/phylogeny_full.png)
-
-All 33 input plastomes were matched to the tree. The other 52 tips have no corresponding input genome
-and retain grey cells (unknown gene content). The orange and green bars show IRb and total genome
-lengths. Group colours come from the supplied metadata. Red cells mark no counted copy, including
-fragment-only or partial annotations; see `tree_absences.tsv` for the flags.
-
-[Open the full-resolution PNG](docs/img/phylogeny_full.png).
-
-</details>
 
 Supply the tree already inferred by IQ-TREE; PanPlast renders it and overlays gene content:
 
