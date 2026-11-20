@@ -23,6 +23,7 @@ from .genes import accession_of, find_files, genes_from_record, load_synonyms, r
 from .text import t
 from .ir import REGIONS, detect_quadripartite, from_annotation
 from .reconcile import reconcile_trna_names
+from .phylogeny import build_overlay, load_tip_map, plot_overlay
 
 GB_EXT = (".gb", ".gbk", ".genbank", ".gbff")
 FA_EXT = (".fa", ".fasta", ".fas", ".fna")
@@ -62,8 +63,20 @@ def parse_args(argv=None):
                     help="shortest inverted repeat accepted as the IR, bp [5000]; lower it for plastomes with reduced IRs")
     bo.add_argument("--window", type=int, default=1200, help="bp shown on each side of a junction [1200]")
     bo.add_argument("--maps", type=int, default=-1, help="number of circular maps to draw (-1 = all, 0 = none)")
+    tr = p.add_argument_group("phylogeny and missing genes")
+    tr.add_argument("--tree", nargs="+", default=[], metavar="FILE",
+                    help="IQ-TREE .treefile / .contree, Newick, or .iqtree report; one or more trees")
+    tr.add_argument("--tree-map", metavar="TSV",
+                    help="optional tip-to-genome mapping with columns tip and genome")
+    tr.add_argument("--tree-genes", metavar="LIST",
+                    help="comma-separated canonical gene names to show (default: genes missing in matched genomes)")
     p.add_argument("--version", action="version", version=f"panplast {__version__}")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if (args.tree_map or args.tree_genes is not None) and not args.tree:
+        p.error("--tree-map and --tree-genes require --tree")
+    if args.tree_genes is not None and not any(g.strip() for g in args.tree_genes.split(",")):
+        p.error("--tree-genes must contain at least one gene name")
+    return args
 
 
 def _label_from_name(stem: str, acc: str | None) -> str:
@@ -264,6 +277,32 @@ def main(argv=None):
         "junction_genes": junctions, "region_coords": coords, "genes_all": genes_tab, "qc": qc,
         "trna_renamed": renames,
     }
+    tree_overlays = []
+    if a.tree:
+        try:
+            tip_map = load_tip_map(a.tree_map)
+            selected_genes = [g.strip() for g in a.tree_genes.split(",") if g.strip()] if a.tree_genes else None
+            tree_taxa, tree_absences, tree_copies = [], [], []
+            for i, path in enumerate(a.tree, 1):
+                overlay = build_overlay(path, matrix, labels, groups, tip_map, selected_genes, loci_by)
+                tree_id = f"{i}: {Path(path).name}"
+                copy_rows = overlay.copies.rename_axis("tip").reset_index().melt(
+                    id_vars="tip", var_name="gene", value_name="copies")
+                for frames, df in ((tree_taxa, overlay.taxa), (tree_absences, overlay.absences),
+                                   (tree_copies, copy_rows)):
+                    df = df.copy()
+                    df.insert(0, "tree", tree_id)
+                    frames.append(df)
+                tree_overlays.append(overlay)
+                statuses = overlay.taxa.status.value_counts()
+                log(f"Tree {tree_id}: {statuses.get('matched', 0)} matched, "
+                    f"{statuses.get('unmatched_tip', 0)} unmatched tips, "
+                    f"{statuses.get('genome_not_in_tree', 0)} genomes outside tree")
+            tables.update(tree_taxa=pd.concat(tree_taxa, ignore_index=True),
+                          tree_absences=pd.concat(tree_absences, ignore_index=True),
+                          tree_copies=pd.concat(tree_copies, ignore_index=True))
+        except (ValueError, OSError) as exc:
+            sys.exit(f"Tree input: {exc}")
     for k, df in tables.items():
         df.to_csv(out / "tables" / f"{k}.tsv", sep="\t", index=False)
     write_excel(out / "panplast_results.xlsx", tables)
@@ -277,6 +316,9 @@ def main(argv=None):
                                              (a.core, a.soft_core, a.shell))
     figs["heatmap"] = plots.gene_heatmap(matrix, cats, order, labels, out / "figures" / "gene_matrix")
     figs["heatmap_var"] = plots.gene_heatmap(matrix, cats, order, labels, out / "figures" / "gene_matrix_variable", True)
+    for i, overlay in enumerate(tree_overlays, 1):
+        for page, figure in enumerate(plot_overlay(overlay, summary, out / "figures" / f"phylogeny_{i}"), 1):
+            figs[f"phylogeny_{i}_{page}"] = figure
     nmaps = len(order) if a.maps < 0 else a.maps
     maps = []
     if nmaps:
@@ -288,7 +330,8 @@ def main(argv=None):
     log(t("log_figs", p=out / "figures"))
 
     report.write_report(out / "report.html", summary, cats, junctions, qc, renames, figs, maps, labels,
-                        (a.core, a.soft_core, a.shell), out)
+                        (a.core, a.soft_core, a.shell), out,
+                        tree_taxa=tables.get("tree_taxa"), tree_absences=tables.get("tree_absences"))
     log(t("log_report", p=out / "report.html", s=time.time() - t0))
     (out / "run.log").write_text("\n".join(log_lines) + "\n")
 
@@ -299,7 +342,8 @@ def write_excel(path, tables):
     from openpyxl.utils import get_column_letter
     names = {"summary": t("sh_summary"), "categories": t("sh_categories"), "matrix": t("sh_matrix"),
              "junction_genes": t("sh_junction"), "region_coords": t("sh_coords"),
-             "genes_all": t("sh_genes"), "qc": t("sh_qc"), "trna_renamed": t("sh_renamed")}
+             "genes_all": t("sh_genes"), "qc": t("sh_qc"), "trna_renamed": t("sh_renamed"),
+             "tree_taxa": "Tree taxa", "tree_absences": "Tree absences", "tree_copies": "Tree gene copies"}
     fills = {"core": "D6E6EC", "soft-core": "E3F1F6", "shell": "F7EBD0", "cloud": "ECEDEF"}
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for k, df in tables.items():

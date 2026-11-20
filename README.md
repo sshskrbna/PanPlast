@@ -66,6 +66,7 @@ open results/report.html        # Linux: xdg-open results/report.html
 | **Raw FASTA too** | Genomes without annotation are annotated by transferring genes from reference GenBank files (blastn), or with PGA. |
 | **Quality control** | Flags draft assemblies (N content), reverse-complemented LSC/SSC, missing genes, and IR boundaries that disagree with the annotation. |
 | **Ready to publish** | PNG, PDF and SVG figures with editable text, an Excel workbook, TSV tables, and a self-contained HTML report with sortable tables. |
+| **Gene absence on a phylogeny** | Load IQ-TREE trees and align them with missing-gene / copy-number heatmaps, IR and genome lengths, and taxonomic groups. |
 
 ## Installation
 
@@ -147,6 +148,7 @@ results/
 │   ├── gene_matrix.{png,pdf,svg}           all genes
 │   ├── gene_matrix_variable.{png,pdf,svg}  only genes that are not core
 │   ├── region_lengths.{png,pdf,svg}
+│   ├── phylogeny_1.{png,pdf,svg}           when --tree is supplied (paginated if >30 genes)
 │   └── maps/<accession>_<species>.{png,pdf}
 ├── annotated_genbank/           only when FASTA files were annotated
 └── run.log
@@ -165,6 +167,9 @@ results/
 | `genes_all` | locus | final name, name in the GenBank, flags (fragment, partial, renamed, ...), candidate names, annotators |
 | `qc` | issue | level and description |
 | `trna_renamed` | tRNA | old and new name, identity and coverage of the homolog |
+| `tree_taxa` | tree × taxon | matched genome ID, species, group, matching method, unmatched tips and genomes outside the tree |
+| `tree_absences` | tree × tip × missing gene | no annotated locus vs. an uncounted locus; fragment / partial / pseudo / excluded flags |
+| `tree_copies` | tree × tip × displayed gene | counted copies; blank means no matching genome, not gene absence |
 </details>
 
 <details>
@@ -272,9 +277,68 @@ boundaries and figures
   --min-ir 5000          shortest repeat accepted as the IR, bp
   --window 1200          bp shown on each side of a junction
   --maps -1              circular maps to draw (-1 = all, 0 = none)
+
+phylogeny and missing genes
+  --tree FILE ...       IQ-TREE .treefile / .contree, Newick, or .iqtree report
+  --tree-map TSV        optional mapping with columns tip and genome
+  --tree-genes LIST     canonical names, e.g. ycf1,ycf2,accD,infA
+                        [default: pan-genes missing in at least one matched genome]
 ```
 
 ### Recipes
+
+<details open>
+<summary><b>IQ-TREE phylogeny with missing genes</b></summary>
+
+Supply the tree already inferred by IQ-TREE; PanPlast renders it and overlays gene content:
+
+```bash
+panplast --genbank gb/ --meta metadata.tsv \
+  --tree phylogeny.contree --out results/
+
+# Display specific genes, including known genes absent from the entire dataset:
+panplast --genbank gb/ --tree phylogeny.treefile \
+  --tree-genes ycf1,ycf2,accD,infA --out results/
+
+# Compare multiple trees against the same pan-genome:
+panplast --genbank gb/ --tree plastome.contree marker.treefile --out results/
+```
+
+`.treefile` is the maximum-likelihood tree and `.contree` the consensus tree from IQ-TREE.
+For a `.iqtree` report, PanPlast reads its first **Tree in newick format** section (the ML tree).
+The input topology, tip order, branch lengths and support labels, including labels such as `88.5/99`,
+are retained. Trees without complete usable branch lengths are drawn as cladograms. Trees are not rerooted.
+No new alignment or IQ-TREE run is performed.
+
+Tips are matched by exact genome ID, accession (also within a longer tip label), or a unique species
+label with spaces / underscores treated equally. An accession without its version can match a unique
+versioned ID. Ambiguous matches fail with a diagnostic rather than silently selecting a genome.
+If the tree uses different IDs, provide a TSV using exact PanPlast genome IDs from `tables/summary.tsv`:
+
+```tsv
+tip	genome
+sample_01	NC_000001.1
+sample_02	NC_000002.1
+```
+
+```bash
+panplast --genbank gb/ --tree phylogeny.contree --tree-map tree_map.tsv --out results/
+```
+
+Each tree produces PNG, PDF and SVG figures in `figures/phylogeny_<number>.*`, a section in the HTML
+report, and three tables / Excel sheets: taxon matching, absences and copy numbers. More than 30
+displayed genes are split across figure pages. Group colours come from `--meta`; bars show IRb and
+total genome lengths. Unmatched tips remain in the tree with grey cells (unknown gene content).
+Input genomes outside the tree still contribute to the main pan-genome statistics.
+
+**Interpretation:** a red cell means **no counted copy under the current filters**, which can reflect
+a fragment, pseudogene, exclusion, incomplete annotation or assembly. The absence table preserves
+those flags. This does not reconstruct an ancestral gene loss or place a loss event on an internal branch;
+that would require an explicit ancestral-state model and biologically justified rooting. Genes absent
+from every genome cannot be discovered from the pan-gene matrix alone; name them explicitly with
+`--tree-genes` (known plastid genes or names observed in the input annotations).
+
+</details>
 
 <details open>
 <summary><b>A dataset annotated with GeSeq</b></summary>
@@ -396,7 +460,8 @@ python -m pytest              # or: python -m unittest discover -s tests
 ```
 
 The tests build synthetic plastomes and cover name resolution, remnant detection, GenBank repair, IR detection across
-the origin, category thresholds and a full end-to-end run.
+the origin, category thresholds, IQ-TREE input, taxon matching, unknown vs. absent gene states,
+figure pagination and full end-to-end reports.
 
 ```
 panplast/
@@ -407,6 +472,7 @@ panplast/
 ├── annotate.py    FASTA annotation (blastn transfer / PGA)
 ├── analysis.py    junction genes, summaries, categories, accumulation curves
 ├── plots.py       all figures
+├── phylogeny.py   IQ-TREE input, taxon matching and gene-content tree figures
 ├── report.py      HTML report
 └── text.py        user-facing strings
 ```

@@ -140,7 +140,8 @@ def _r(key, **kw):
     return s.format(**kw) if kw else s
 
 
-def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels, thr, root):
+def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels, thr, root,
+                 tree_taxa=None, tree_absences=None):
     root = Path(root)
     n = len(summary)
     cnt = cats.category.astype(str).value_counts().reindex(CATEGORY_ORDER, fill_value=0)
@@ -201,13 +202,32 @@ def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels
             for g, m in maps)
         gallery = f'<div class="gallery">{items}</div>'
 
+    tree_section, tree_nav = "", ""
+    tree_figs = [key for key in figs if key.startswith("phylogeny_")]
+    if tree_figs:
+        tree_nav = '<a href="#phylogeny">Phylogeny &amp; missing genes</a>'
+        figures = "".join(fig_block(key, "Tree topology and support labels from the supplied IQ-TREE file. "
+                                    "Rows share the same order across tree, genome lengths and gene matrix.")
+                          for key in tree_figs)
+        tree_section = (f'<section id="phylogeny"><h2>Phylogeny and missing genes</h2>'
+                        '<p class="note">Red cells: no counted copy under the current gene filters. '
+                        'Grey cells: no matching input genome, so gene content is unknown. '
+                        'Fragment-only or pseudo-only loci can appear absent; see flags in the table. '
+                        'These are observed absences, not reconstructed evolutionary loss events. '
+                        'Genomes outside the tree remain in the main pan-genome analysis.</p>'
+                        f'{figures}<h3>Missing or uncounted genes</h3>{_table(tree_absences, "t_tree_absences")}'
+                        f'<h3>Taxon matching</h3>{_table(tree_taxa, "t_tree_taxa")}'
+                        '<p class="dl">TSV: <a href="tables/tree_absences.tsv">absences</a> · '
+                        '<a href="tables/tree_taxa.tsv">taxon matching</a> · '
+                        '<a href="tables/tree_copies.tsv">copy numbers (blank = unknown)</a></p></section>')
+
     doc = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{_r("title")}</title>
 <style>{CSS}</style></head><body><main>
 <h1>{_r("h1")}</h1>
 <p class="sub">{_r("sub", n=n)} <a href="panplast_results.xlsx">panplast_results.xlsx</a>, <a href="tables/">tables/*.tsv</a></p>
 <nav><a href="#sum">{_r("nav_sum")}</a><a href="#cats">Core / soft core</a><a href="#junc">{_r("nav_junc")}</a>
-<a href="#reg">{_r("nav_reg")}</a><a href="#matrix">{_r("nav_matrix")}</a><a href="#maps">{_r("nav_maps")}</a><a href="#qc">QC</a></nav>
+<a href="#reg">{_r("nav_reg")}</a><a href="#matrix">{_r("nav_matrix")}</a>{tree_nav}<a href="#maps">{_r("nav_maps")}</a><a href="#qc">QC</a></nav>
 <section id="sum"><h2>{_r("nav_sum")}</h2><div class="cards">{cards}</div></section>
 <section id="cats"><h2>{_r("h_cats")}</h2>
 {fig_block("pangenome", _r("cap_pan"))}
@@ -225,6 +245,7 @@ def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels
 <section id="matrix"><h2>{_r("h_matrix")}</h2>
 {fig_block("heatmap_var", _r("cap_var"))}
 <details><summary>{_r("full_matrix")}</summary>{fig_block("heatmap", _r("cap_full"))}</details></section>
+{tree_section}
 <section id="maps"><h2>{_r("h_maps")}</h2><p class="note">{_r("maps_note")}</p>{gallery}</section>
 <section id="qc"><h2>{_r("h_qc")}</h2>
 <p class="note">{_r("qc_note")}</p>{_table(qc, "t_qc")}
