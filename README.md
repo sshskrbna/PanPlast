@@ -11,8 +11,9 @@
 </p>
 
 <p align="center">
-  <b>One command turns a folder of plastomes into IRscope-style junction plots, core / soft-core gene sets,<br>
-  publication-ready figures, an Excel workbook and an interactive HTML report.</b>
+  <b>Compare plastome IR boundaries, junction genes and core / soft-core gene content.<br>
+  Add an IQ-TREE phylogeny to display missing genes, copy numbers and genome sizes.<br>
+  Get publication-ready figures, an Excel workbook and an interactive HTML report.</b>
 </p>
 
 <p align="center">
@@ -21,6 +22,7 @@
   <a href="#what-you-get">What you get</a> ·
   <a href="#why-panplast">Why PanPlast</a> ·
   <a href="#usage">Usage</a> ·
+  <a href="#iq-tree-phylogeny-and-missing-genes">IQ-TREE &amp; missing genes</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#faq--troubleshooting">FAQ</a>
 </p>
@@ -54,6 +56,18 @@ open results/report.html        # Linux: xdg-open results/report.html
 ```
 
 49 plastomes take about 3 minutes on a laptop.
+
+To include an existing IQ-TREE phylogeny in the same analysis:
+
+```bash
+panplast --genbank geseq_results/ --meta metadata.tsv \
+  --tree plastome.contree --out results_with_tree/
+open results_with_tree/report.html
+```
+
+Use `--tree-genes ycf1,ycf2,accD,infA` to show specific genes, or omit it to select pan-genes
+missing in at least one matched genome. See [IQ-TREE and missing genes](#iq-tree-phylogeny-and-missing-genes)
+for taxon mapping, colour meanings and output files.
 
 ## Features
 
@@ -133,7 +147,20 @@ One environment with Python, all libraries and BLAST+.
 | [PGA](https://github.com/quxiaojian/PGA) + Perl | any | only for `--pga` |
 
 Without installing, you can also run `python3 -m panplast ...` from the repository folder once the dependencies are present.
+Reading existing IQ-TREE output uses Biopython, which is already included; it does not require an IQ-TREE executable.
 </details>
+
+### Updating an existing installation
+
+From your PanPlast checkout, with its Python environment activated:
+
+```bash
+git pull --ff-only
+pip install -e .
+panplast --help
+```
+
+The help output should include `--tree`, `--tree-map` and `--tree-genes`.
 
 ## What you get
 
@@ -146,7 +173,7 @@ results/
 │   ├── ir_junctions.{png,pdf,svg}
 │   ├── core_softcore.{png,pdf,svg}
 │   ├── gene_matrix.{png,pdf,svg}           all genes
-│   ├── gene_matrix_variable.{png,pdf,svg}  only genes that are not core
+│   ├── gene_matrix_variable.{png,pdf,svg}  genes with variable presence or copy number
 │   ├── region_lengths.{png,pdf,svg}
 │   ├── phylogeny_1.{png,pdf,svg}           when --tree is supplied (paginated if >30 genes)
 │   └── maps/<accession>_<species>.{png,pdf}
@@ -167,10 +194,14 @@ results/
 | `genes_all` | locus | final name, name in the GenBank, flags (fragment, partial, renamed, ...), candidate names, annotators |
 | `qc` | issue | level and description |
 | `trna_renamed` | tRNA | old and new name, identity and coverage of the homolog |
-| `tree_taxa` | tree × taxon | matched genome ID, species, group, matching method, unmatched tips and genomes outside the tree |
-| `tree_absences` | tree × tip × missing gene | no annotated locus vs. an uncounted locus; fragment / partial / pseudo / excluded flags |
-| `tree_copies` | tree × tip × displayed gene | counted copies; blank means no matching genome, not gene absence |
+| `tree_taxa` / `Tree taxa` | tree × taxon | matched genome ID, species, group, matching method, unmatched tips and genomes outside the tree |
+| `tree_absences` / `Tree absences` | tree × tip × missing gene | no annotated locus vs. an uncounted locus; fragment / partial / pseudo / excluded flags |
+| `tree_copies` / `Tree gene copies` | tree × tip × displayed gene | counted copies; blank means no matching genome, not gene absence |
 </details>
+
+The three `tree_*` tables are added only when `--tree` is supplied. Names before the slash are TSV
+basenames; names after it are Excel sheet names. A paginated tree uses filenames such as
+`phylogeny_1_1.png`, `phylogeny_1_2.png`; a second input tree uses the `phylogeny_2` prefix.
 
 <details>
 <summary><b>Reading the junction figure</b></summary>
@@ -198,7 +229,7 @@ and **JLA** (IRa/LSC), shown ±`--window` bp (1200 by default).
 The report also gives *soft core including core* (≥ 95 %), the definition many papers use.
 For Roary-style categories (core ≥ 99 %) use `--core 0.99`.
 
-A gene counts as present when at least one complete copy is annotated. Fragments, remnants, `/pseudo` genes
+A gene counts as present when at least one complete copy is annotated. Fragments, remnants, `/pseudo` or `/pseudogene` loci
 (unless `--include-pseudo`), tRNAs without an anticodon and genes in `--exclude` stay in `genes_all` with their
 flags, but are not counted.
 </details>
@@ -208,7 +239,7 @@ flags, but are not counted.
 
 | Level | Examples |
 |---|---|
-| error | IR not found; more than 1 % N, i.e. a draft assembly whose genes inside gaps cannot be found |
+| error | no gene loci extracted; IR not found; more than 1 % N, i.e. a draft assembly whose genes inside gaps cannot be found |
 | check | soft-core genes missing from this genome; LSC or SSC deposited reverse-complemented |
 | note | IR from self-BLAST differs from the GenBank annotation; GenBank has no region annotation; non-standard tRNA names |
 </details>
@@ -240,6 +271,8 @@ Inputs can be mixed. Files are matched to genomes by accession, found in the fil
 | `--genbank` | annotated GenBank files or folders (`.gb`, `.gbk`, `.genbank`, `.gbff`) | GeSeq `*_GenBank.gb`, PGA output, NCBI records. GeSeq `/info` evidence is used to resolve names. |
 | `--fasta` | FASTA files or folders, one genome per file | Used only for labels when a GenBank of the same accession is given; otherwise annotated. |
 | `--meta` | TSV with `accession` (or `file`), `species`, optional `group` / `subtribe` | Sets species labels and the order of genomes (by group, then species). |
+| `--tree` | one or more `.treefile`, `.contree`, Newick or `.iqtree` files | Adds gene-content overlays to existing phylogenies. |
+| `--tree-map` | TSV with `tip`, `genome` | Links tree labels to exact PanPlast genome IDs when automatic matching is insufficient. |
 
 ```tsv
 accession	species	group
@@ -285,10 +318,7 @@ phylogeny and missing genes
                         [default: pan-genes missing in at least one matched genome]
 ```
 
-### Recipes
-
-<details open>
-<summary><b>IQ-TREE phylogeny with missing genes</b></summary>
+### IQ-TREE phylogeny and missing genes
 
 Supply the tree already inferred by IQ-TREE; PanPlast renders it and overlays gene content:
 
@@ -325,11 +355,30 @@ sample_02	NC_000002.1
 panplast --genbank gb/ --tree phylogeny.contree --tree-map tree_map.tsv --out results/
 ```
 
+`tip` must match the original tree label exactly. `genome` must match a genome ID from
+`tables/summary.tsv`, including a version or a duplicate-ID suffix such as `_2` when present.
+Each tree tip must map to at most one genome, and each genome to at most one tip within that tree.
+
 Each tree produces PNG, PDF and SVG figures in `figures/phylogeny_<number>.*`, a section in the HTML
 report, and three tables / Excel sheets: taxon matching, absences and copy numbers. More than 30
 displayed genes are split across figure pages. Group colours come from `--meta`; bars show IRb and
 total genome lengths. Unmatched tips remain in the tree with grey cells (unknown gene content).
 Input genomes outside the tree still contribute to the main pan-genome statistics.
+
+| Figure element | Meaning |
+|---|---|
+| Red cell | No counted copy under the selected gene filters |
+| Light blue cell | One counted copy |
+| Dark blue cell | Two or more counted copies; exact values are in `tree_copies.tsv` |
+| Grey cell | No matching input genome; gene content is unknown |
+| Orange / green bars | IRb length / total genome length, in kb |
+| Coloured tip markers and labels | Groups supplied through `--meta` |
+
+In `tree_taxa.tsv`, `matched` identifies a linked tip, `unmatched_tip` identifies an unlinked tree
+tip, and `genome_not_in_tree` identifies an input genome without a matching tip. In
+`tree_absences.tsv`, `not_annotated` means no extracted locus has that canonical name;
+`not_counted` means a locus exists but does not pass the current filters. Check its `flags` column
+and the corresponding rows in `genes_all.tsv`.
 
 **Interpretation:** a red cell means **no counted copy under the current filters**, which can reflect
 a fragment, pseudogene, exclusion, incomplete annotation or assembly. The absence table preserves
@@ -338,7 +387,7 @@ that would require an explicit ancestral-state model and biologically justified 
 from every genome cannot be discovered from the pan-gene matrix alone; name them explicitly with
 `--tree-genes` (known plastid genes or names observed in the input annotations).
 
-</details>
+### More examples
 
 <details open>
 <summary><b>A dataset annotated with GeSeq</b></summary>
@@ -422,6 +471,10 @@ flowchart LR
     G --> I[Report · Excel · TSV · figures]
     H --> I
     F --> J[QC] --> I
+    T[IQ-TREE output] --> K[Match tips to genomes]
+    G --> K
+    K --> L[Tree + gene copies + genome lengths]
+    L --> I
 ```
 
 1. **Reading.** GenBank files are repaired (origin-wrapping and `..0` locations) and parsed with Biopython.
@@ -439,6 +492,9 @@ flowchart LR
    and the larger single-copy region is the LSC.
 7. **Junction genes.** For each junction, genes crossing it and the two nearest genes on each side within 3 kb.
 8. **Statistics.** Presence / copy matrix, categories, frequency spectrum, accumulation curves (200 permutations).
+9. **Phylogeny (optional).** Read existing IQ-TREE output, match tips to input genomes and align their gene
+   counts with the tree, IRb and genome lengths. Unmatched tips retain unknown states; no ancestral-state
+   reconstruction is performed.
 
 ## FAQ & troubleshooting
 
@@ -450,6 +506,13 @@ flowchart LR
 | QC: "LSC reverse-complemented" | The record has the LSC in the opposite orientation; reorient it before comparing junctions |
 | QC: "self-BLAST and GenBank boundaries differ" | Usually the annotator truncated the IR at the origin. Check `region_coords`; `--ir-source genbank` keeps the annotation's boundaries |
 | A gene I expect is absent | Find it in `tables/genes_all.tsv`: the `flags` column says if it was a fragment, partial, pseudo or unresolved |
+| `unrecognized arguments: --tree` | Update the checkout and reinstall with `pip install -e .` in the active environment. Check `panplast --help`. |
+| `No tree tips match the input genomes` | Compare tree labels with `tables/summary.tsv` from a run without `--tree`, then supply `--tree-map`. |
+| `Ambiguous tree tip` | Several genomes share the matched label or accession. Use an explicit `tip` → `genome` mapping. |
+| `Multiple tree tips map to genome` | Use one tip per input genome within each tree, or correct the mapping file. |
+| A tree row is grey | Its tip has no matching input genome. Check `tree_taxa.tsv` and supply a mapping or the missing GenBank. |
+| A gene is missing from the default tree heatmap | Default selection uses observed pan-genes absent in a matched genome. Use `--tree-genes` to include a specific known gene, even if absent everywhere. |
+| A tree cell is red but a fragment is annotated | Red means no counted copy. Inspect `tree_absences.tsv` and `genes_all.tsv` for fragment, partial, pseudo or excluded flags. |
 | Matplotlib font warnings | Harmless |
 
 ## Development
@@ -471,7 +534,7 @@ panplast/
 ├── reconcile.py   tRNA renaming by homology
 ├── annotate.py    FASTA annotation (blastn transfer / PGA)
 ├── analysis.py    junction genes, summaries, categories, accumulation curves
-├── plots.py       all figures
+├── plots.py       junction, pan-genome and circular-map figures
 ├── phylogeny.py   IQ-TREE input, taxon matching and gene-content tree figures
 ├── report.py      HTML report
 └── text.py        user-facing strings
