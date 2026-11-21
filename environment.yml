@@ -8,6 +8,7 @@ dependencies:
   - biopython>=1.79
   - pandas>=1.5
   - numpy>=1.22
+  - scipy>=1.9
   - matplotlib>=3.6
   - openpyxl>=3.0
   - blast>=2.10

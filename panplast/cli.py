@@ -24,6 +24,7 @@ from .text import t
 from .ir import REGIONS, detect_quadripartite, from_annotation
 from .reconcile import reconcile_trna_names
 from .phylogeny import build_overlay, load_tip_map, plot_overlay
+from .correlations import correlation_results, scatter_data, scatter_plots
 
 GB_EXT = (".gb", ".gbk", ".genbank", ".gbff")
 FA_EXT = (".fa", ".fasta", ".fas", ".fna")
@@ -63,6 +64,13 @@ def parse_args(argv=None):
                     help="shortest inverted repeat accepted as the IR, bp [5000]; lower it for plastomes with reduced IRs")
     bo.add_argument("--window", type=int, default=1200, help="bp shown on each side of a junction [1200]")
     bo.add_argument("--maps", type=int, default=-1, help="number of circular maps to draw (-1 = all, 0 = none)")
+    sc = p.add_argument_group("genome correlations")
+    sc.add_argument("--gene-count", choices=["total", "unique"], default="total",
+                    help="scatterplot gene counts: total counted copies including IR, or unique names [total]")
+    sc.add_argument("--highlight-gene", default="ycf2", metavar="GENE",
+                    help="highlight genomes without a counted copy of this gene [ycf2]; 'none' disables it")
+    sc.add_argument("--highlight-genomes", default="", metavar="LIST",
+                    help="comma-separated exact genome IDs to mark with orange squares")
     tr = p.add_argument_group("phylogeny and missing genes")
     tr.add_argument("--tree", nargs="+", default=[], metavar="FILE",
                     help="IQ-TREE .treefile / .contree, Newick, or .iqtree report; one or more trees")
@@ -76,6 +84,8 @@ def parse_args(argv=None):
         p.error("--tree-map and --tree-genes require --tree")
     if args.tree_genes is not None and not any(g.strip() for g in args.tree_genes.split(",")):
         p.error("--tree-genes must contain at least one gene name")
+    if not args.highlight_gene.strip():
+        p.error("--highlight-gene must be a gene name or 'none'")
     return args
 
 
@@ -186,6 +196,9 @@ def main(argv=None):
             labels[gid] = m["species"]
     groups = {gid: meta.get(gid, {}).get("group", "") for gid in records}
     order = sorted(records, key=lambda g: (groups.get(g, ""), labels.get(g, g)))
+    highlighted = {g.strip() for g in a.highlight_genomes.split(",") if g.strip()}
+    if highlighted - set(records):
+        sys.exit("Unknown --highlight-genomes IDs: " + ", ".join(sorted(highlighted - set(records))))
 
     # ---------------------------------------------------------------- per genome
     loci_by, seqs, quads, quads_gb = {}, {}, {}, {}
@@ -277,6 +290,13 @@ def main(argv=None):
         "junction_genes": junctions, "region_coords": coords, "genes_all": genes_tab, "qc": qc,
         "trna_renamed": renames,
     }
+    highlight_gene = a.highlight_gene.strip()
+    highlight_gene = None if highlight_gene.lower() == "none" else syn.get(highlight_gene, highlight_gene)
+    try:
+        scatter_points = scatter_data(summary, matrix, a.gene_count, highlight_gene, highlighted, loci_by)
+    except ValueError as exc:
+        sys.exit(f"Scatterplot input: {exc}")
+    tables.update(scatter_points=scatter_points, correlations=correlation_results(scatter_points))
     tree_overlays = []
     if a.tree:
         try:
@@ -316,6 +336,8 @@ def main(argv=None):
                                              (a.core, a.soft_core, a.shell))
     figs["heatmap"] = plots.gene_heatmap(matrix, cats, order, labels, out / "figures" / "gene_matrix")
     figs["heatmap_var"] = plots.gene_heatmap(matrix, cats, order, labels, out / "figures" / "gene_matrix_variable", True)
+    for key, figure in scatter_plots(scatter_points, out / "figures").items():
+        figs[f"correlation_{key}"] = figure
     for i, overlay in enumerate(tree_overlays, 1):
         for page, figure in enumerate(plot_overlay(overlay, summary, out / "figures" / f"phylogeny_{i}"), 1):
             figs[f"phylogeny_{i}_{page}"] = figure
@@ -343,7 +365,8 @@ def write_excel(path, tables):
     names = {"summary": t("sh_summary"), "categories": t("sh_categories"), "matrix": t("sh_matrix"),
              "junction_genes": t("sh_junction"), "region_coords": t("sh_coords"),
              "genes_all": t("sh_genes"), "qc": t("sh_qc"), "trna_renamed": t("sh_renamed"),
-             "tree_taxa": "Tree taxa", "tree_absences": "Tree absences", "tree_copies": "Tree gene copies"}
+             "tree_taxa": "Tree taxa", "tree_absences": "Tree absences", "tree_copies": "Tree gene copies",
+             "scatter_points": "Scatterplot data", "correlations": "Correlations"}
     fills = {"core": "D6E6EC", "soft-core": "E3F1F6", "shell": "F7EBD0", "cloud": "ECEDEF"}
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for k, df in tables.items():

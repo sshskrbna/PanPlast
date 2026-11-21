@@ -203,6 +203,22 @@ def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels
         gallery = f'<div class="gallery">{items}</div>'
 
     tree_section, tree_nav = "", ""
+    correlation_section, correlation_nav = "", ""
+    correlation_figs = [key for key in figs if key.startswith("correlation_")]
+    if correlation_figs:
+        correlation_nav = '<a href="#correlations">Genome correlations</a>'
+        correlation_section = ('<section id="correlations"><h2>Genome size, IR and gene content</h2>'
+                               '<p class="note">Colours: metadata groups. Triangles and red rings: no counted '
+                               'copy of the highlighted gene under the current annotation filters. Orange squares: '
+                               'user-selected genomes; they do not automatically diagnose IR collapse. '
+                               'Dashed lines show ordinary least-squares fits with pointwise 95% confidence '
+                               'intervals for the mean response. Pearson p-values are nominal, without '
+                               'phylogenetic correction. Plastome length includes both IR copies, so its '
+                               'relationship with IR length partly reflects shared components.</p>' +
+                               "".join(fig_block(key, "Counts and statistics are recalculated for the input dataset; "
+                                                 "only paired finite values enter each fit.") for key in correlation_figs) +
+                               '<p class="dl">TSV: <a href="tables/correlations.tsv">regression statistics</a> · '
+                               '<a href="tables/scatter_points.tsv">plotted data</a></p></section>')
     tree_figs = [key for key in figs if key.startswith("phylogeny_")]
     if tree_figs:
         tree_nav = '<a href="#phylogeny">Phylogeny &amp; missing genes</a>'
@@ -227,7 +243,7 @@ def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels
 <h1>{_r("h1")}</h1>
 <p class="sub">{_r("sub", n=n)} <a href="panplast_results.xlsx">panplast_results.xlsx</a>, <a href="tables/">tables/*.tsv</a></p>
 <nav><a href="#sum">{_r("nav_sum")}</a><a href="#cats">Core / soft core</a><a href="#junc">{_r("nav_junc")}</a>
-<a href="#reg">{_r("nav_reg")}</a><a href="#matrix">{_r("nav_matrix")}</a>{tree_nav}<a href="#maps">{_r("nav_maps")}</a><a href="#qc">QC</a></nav>
+<a href="#reg">{_r("nav_reg")}</a><a href="#matrix">{_r("nav_matrix")}</a>{correlation_nav}{tree_nav}<a href="#maps">{_r("nav_maps")}</a><a href="#qc">QC</a></nav>
 <section id="sum"><h2>{_r("nav_sum")}</h2><div class="cards">{cards}</div></section>
 <section id="cats"><h2>{_r("h_cats")}</h2>
 {fig_block("pangenome", _r("cap_pan"))}
@@ -246,6 +262,7 @@ def write_report(path, summary, cats, junctions, qc, renames, figs, maps, labels
 {fig_block("heatmap_var", _r("cap_var"))}
 <details><summary>{_r("full_matrix")}</summary>{fig_block("heatmap", _r("cap_full"))}</details></section>
 {tree_section}
+{correlation_section}
 <section id="maps"><h2>{_r("h_maps")}</h2><p class="note">{_r("maps_note")}</p>{gallery}</section>
 <section id="qc"><h2>{_r("h_qc")}</h2>
 <p class="note">{_r("qc_note")}</p>{_table(qc, "t_qc")}

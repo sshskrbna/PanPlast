@@ -22,6 +22,7 @@
   <a href="#what-you-get">What you get</a> ·
   <a href="#why-panplast">Why PanPlast</a> ·
   <a href="#usage">Usage</a> ·
+  <a href="#genome-correlation-plots">Genome correlations</a> ·
   <a href="#iq-tree-phylogeny-and-missing-genes">IQ-TREE &amp; missing genes</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#faq--troubleshooting">FAQ</a>
@@ -81,6 +82,7 @@ for taxon mapping, colour meanings and output files.
 | **Quality control** | Flags draft assemblies (N content), reverse-complemented LSC/SSC, missing genes, and IR boundaries that disagree with the annotation. |
 | **Ready to publish** | PNG, PDF and SVG figures with editable text, an Excel workbook, TSV tables, and a self-contained HTML report with sortable tables. |
 | **Gene absence on a phylogeny** | Load IQ-TREE trees and align them with missing-gene / copy-number heatmaps, IR and genome lengths, and taxonomic groups. |
+| **Genome correlations** | Gene count vs. plastome size, plastome size vs. IR length, and gene count vs. IR length, with labelled taxa, group colours, regression lines and confidence intervals. |
 
 ## Installation
 
@@ -143,7 +145,7 @@ One environment with Python, all libraries and BLAST+.
 |---|---|---|
 | Python | ≥ 3.9 | |
 | BLAST+ (`blastn`) | ≥ 2.10 | required |
-| biopython, pandas, numpy, matplotlib, openpyxl | see `pyproject.toml` | installed automatically |
+| biopython, pandas, numpy, scipy, matplotlib, openpyxl | see `pyproject.toml` | installed automatically |
 | [PGA](https://github.com/quxiaojian/PGA) + Perl | any | only for `--pga` |
 
 Without installing, you can also run `python3 -m panplast ...` from the repository folder once the dependencies are present.
@@ -175,6 +177,9 @@ results/
 │   ├── gene_matrix.{png,pdf,svg}           all genes
 │   ├── gene_matrix_variable.{png,pdf,svg}  genes with variable presence or copy number
 │   ├── region_lengths.{png,pdf,svg}
+│   ├── genes_vs_genome.{png,pdf,svg}
+│   ├── genome_vs_ir.{png,pdf,svg}
+│   ├── genes_vs_ir.{png,pdf,svg}
 │   ├── phylogeny_1.{png,pdf,svg}           when --tree is supplied (paginated if >30 genes)
 │   └── maps/<accession>_<species>.{png,pdf}
 ├── annotated_genbank/           only when FASTA files were annotated
@@ -194,6 +199,8 @@ results/
 | `genes_all` | locus | final name, name in the GenBank, flags (fragment, partial, renamed, ...), candidate names, annotators |
 | `qc` | issue | level and description |
 | `trna_renamed` | tRNA | old and new name, identity and coverage of the homolog |
+| `scatter_points` / `Scatterplot data` | genome | plotted genome / IR sizes, gene count and count mode, group, highlighted gene copy number and selected-genome marker |
+| `correlations` / `Correlations` | comparison | valid pairs, excluded rows, Pearson r, two-sided p, OLS slope / intercept, confidence level and fit status |
 | `tree_taxa` / `Tree taxa` | tree × taxon | matched genome ID, species, group, matching method, unmatched tips and genomes outside the tree |
 | `tree_absences` / `Tree absences` | tree × tip × missing gene | no annotated locus vs. an uncounted locus; fragment / partial / pseudo / excluded flags |
 | `tree_copies` / `Tree gene copies` | tree × tip × displayed gene | counted copies; blank means no matching genome, not gene absence |
@@ -311,12 +318,60 @@ boundaries and figures
   --window 1200          bp shown on each side of a junction
   --maps -1              circular maps to draw (-1 = all, 0 = none)
 
+genome correlations
+  --gene-count {total,unique}  counted copies including IR, or unique gene names [total]
+  --highlight-gene GENE       ring genomes without a counted copy [ycf2]; 'none' disables
+  --highlight-genomes LIST    exact genome IDs to mark with orange squares
+
 phylogeny and missing genes
   --tree FILE ...       IQ-TREE .treefile / .contree, Newick, or .iqtree report
   --tree-map TSV        optional mapping with columns tip and genome
   --tree-genes LIST     canonical names, e.g. ycf1,ycf2,accD,infA
                         [default: pan-genes missing in at least one matched genome]
 ```
+
+### Genome correlation plots
+
+Every run produces three scatterplots, without needing a tree or a separate command:
+
+| Figure | X | Y |
+|---|---|---|
+| `genes_vs_genome` | Total plastome size (kb) | Counted genes |
+| `genome_vs_ir` | IRb length (kb) | Total plastome size (kb) |
+| `genes_vs_ir` | IRb length (kb) | Counted genes |
+
+```bash
+panplast --genbank gb/ --meta metadata.tsv --out results/ \
+  --gene-count total --highlight-gene ycf2
+
+# Count unique gene names instead of copies, and mark a selected genome:
+panplast --genbank gb/ --meta metadata.tsv --out results_unique/ \
+  --gene-count unique --highlight-gene infA --highlight-genomes NC_000001.1
+```
+
+Colours follow `group` / `subtribe` in `--meta`; labels use species names, with accessions added when
+abbreviated labels repeat. Without metadata groups, all genomes share an `Ungrouped` colour.
+Gene counts are calculated from the presence / copy matrix: `total` sums counted copies including IR
+copies; `unique` counts distinct names with at least one counted copy. Fragments and other uncounted
+loci follow the same filters as the main analysis.
+
+For `--highlight-gene` (default `ycf2`), circles indicate a counted copy and triangles with red rings
+indicate no counted copy. This can reflect incomplete annotation, fragments, pseudogenes or exclusions,
+not necessarily a biological gene loss. Use `--highlight-gene none` to disable gene-status markers.
+Orange squares mark only the exact IDs listed in `--highlight-genomes`; the program does not infer
+IR collapse from that selection. Duplicate species labels remain separate genomes.
+
+The dashed line is an ordinary least-squares fit; shading is the pointwise 95% confidence interval
+for its **mean response**, not a prediction interval for individual genomes. Pearson `r`, nominal
+two-sided `p` and the number of valid pairs `n` are calculated separately for each comparison.
+Fits use only paired finite values; missing IR lengths remain missing. With fewer than three valid
+pairs, or a constant X or Y variable, the points are retained and `r` / `p` are reported as undefined.
+Exact statistics and plotted values are exported to `correlations.tsv`, `scatter_points.tsv` and Excel.
+The implementation uses [SciPy's statistical routines](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.linregress.html).
+
+These are descriptive comparisons without phylogenetic correction or adjustment for multiple tests.
+Total plastome length includes both IR copies, so its correlation with IR length partly reflects that
+shared component. Neither the nominal p-value nor the regression alone establishes an evolutionary cause.
 
 ### IQ-TREE phylogeny and missing genes
 
@@ -491,7 +546,8 @@ flowchart LR
    IR spanning the origin is found intact. Collinear HSPs are chained. The longest chain (≥ `--min-ir`) is the IR,
    and the larger single-copy region is the LSC.
 7. **Junction genes.** For each junction, genes crossing it and the two nearest genes on each side within 3 kb.
-8. **Statistics.** Presence / copy matrix, categories, frequency spectrum, accumulation curves (200 permutations).
+8. **Statistics.** Presence / copy matrix, categories, frequency spectrum, accumulation curves (200 permutations),
+   and descriptive genome / IR / gene-count regressions with Pearson statistics and mean-response confidence intervals.
 9. **Phylogeny (optional).** Read existing IQ-TREE output, match tips to input genomes and align their gene
    counts with the tree, IRb and genome lengths. Unmatched tips retain unknown states; no ancestral-state
    reconstruction is performed.
@@ -524,7 +580,7 @@ python -m pytest              # or: python -m unittest discover -s tests
 
 The tests build synthetic plastomes and cover name resolution, remnant detection, GenBank repair, IR detection across
 the origin, category thresholds, IQ-TREE input, taxon matching, unknown vs. absent gene states,
-figure pagination and full end-to-end reports.
+figure pagination, regression / confidence-interval calculations, missing-data handling and full end-to-end reports.
 
 ```
 panplast/
@@ -535,6 +591,7 @@ panplast/
 ├── annotate.py    FASTA annotation (blastn transfer / PGA)
 ├── analysis.py    junction genes, summaries, categories, accumulation curves
 ├── plots.py       junction, pan-genome and circular-map figures
+├── correlations.py  genome / IR / gene-count regressions and scatterplots
 ├── phylogeny.py   IQ-TREE input, taxon matching and gene-content tree figures
 ├── report.py      HTML report
 └── text.py        user-facing strings
