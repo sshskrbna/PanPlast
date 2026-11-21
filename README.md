@@ -169,6 +169,7 @@ The help output should include `--tree`, `--tree-map` and `--tree-genes`.
 ```
 results/
 ├── report.html                  ← start here: interactive report with every figure and table
+├── correlations.html            the three correlation plots on a separate, self-contained page
 ├── panplast_results.xlsx        all tables, one sheet each
 ├── tables/                      the same tables as TSV
 ├── figures/
@@ -332,7 +333,9 @@ phylogeny and missing genes
 
 ### Genome correlation plots
 
-Every run produces three scatterplots, without needing a tree or a separate command:
+Every run produces three scatterplots, without needing a tree or a separate command. They appear
+immediately after the summary in `report.html`, with a prominent link at the top. You can also open
+`correlations.html` to view just these plots without scrolling past the other figures or tree tables:
 
 | Figure | X | Y |
 |---|---|---|

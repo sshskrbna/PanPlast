@@ -152,6 +152,12 @@ class TestCorrelationPipeline(unittest.TestCase):
                 self.assertTrue({"Scatterplot data", "Correlations"} <= set(book.sheet_names))
             html = (out / "report.html").read_text()
             self.assertTrue('id="correlations"' in html)
+            self.assertLess(html.index('<section id="correlations">'), html.index('<section id="cats">'))
+            self.assertTrue('href="correlations.html"' in html)
+            standalone = (out / "correlations.html").read_text()
+            self.assertEqual(standalone.count('src="data:image/png;base64,'), 3)
+            self.assertTrue('href="report.html"' in standalone)
+            self.assertTrue('id="phylogeny"' not in standalone)
             self.assertTrue("without phylogenetic correction" in html)
             self.assertFalse('id="phylogeny"' in html)
 
