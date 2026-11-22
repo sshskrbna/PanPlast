@@ -9,6 +9,7 @@ import pandas as pd
 from scipy import stats
 
 from .genes import EXPECTED_CDS_LEN, PLASTID_TRNAS
+from .styling import category_colors
 
 
 COMPARISONS = (
@@ -16,6 +17,11 @@ COMPARISONS = (
     ("genome_vs_ir", "ir_kb", "genome_kb", "Plastome size vs. IR length"),
     ("genes_vs_ir", "ir_kb", "gene_count", "Counted genes vs. IR length"),
 )
+
+def _group_colors(data):
+    if "color_label" in data and "color" in data:
+        return category_colors(data, "color_label", "color")
+    return category_colors(data)
 
 
 @dataclass
@@ -27,7 +33,8 @@ class Regression:
     upper: np.ndarray
 
 
-def scatter_data(summary, matrix, gene_count="total", highlight_gene="ycf2", highlight_genomes=(), loci_by=None):
+def scatter_data(summary, matrix, gene_count="total", highlight_gene=None, highlight_genomes=(), loci_by=None,
+                 colors_by_group=None, styles=None):
     """Use counted copies from the same matrix as the main pan-genome analysis."""
     if gene_count not in {"total", "unique"}:
         raise ValueError("gene_count must be 'total' or 'unique'")
@@ -42,6 +49,15 @@ def scatter_data(summary, matrix, gene_count="total", highlight_gene="ycf2", hig
             raise ValueError(f"Unknown --highlight-gene name: {highlight_gene}")
     data = summary[["genome", "species"]].copy()
     data["group"] = summary["group"].fillna("").replace("", "Ungrouped") if "group" in summary else "Ungrouped"
+    from matplotlib.colors import to_hex
+    data["group_color"] = data.group.map(colors_by_group or {}).fillna("")
+    colors = _group_colors(data)
+    data["group_color"] = data.group.map({group: to_hex(color, keep_alpha=True) for group, color in colors.items()})
+    if styles is not None:
+        style_index = styles.set_index("genome")
+        for column in ("color_by", "color_label", "color", "label_by", "display_label"):
+            data[column] = data.genome.map(style_index[column])
+        data["group_color"] = data["color"]  # Kept for compatibility with older exports.
     data["genome_kb"] = summary["length_bp"] / 1000
     data["ir_kb"] = summary["IRb_bp"] / 1000
     counts = matrix.sum(axis=0) if gene_count == "total" else (matrix > 0).sum(axis=0)
@@ -100,7 +116,7 @@ def correlation_results(data):
 def _point_labels(data):
     labels = []
     for row in data.itertuples():
-        words = str(row.species or row.genome).split()
+        words = str(getattr(row, "display_label", None) or row.species or row.genome).split()
         label = f"{words[0][0]}. {' '.join(words[1:])}" if len(words) >= 2 else " ".join(words)
         labels.append(label)
     repeated = Counter(labels)
@@ -122,10 +138,10 @@ def _place_labels(ax, data, x, y, colors, reserved):
         return max(0, min(a.x1, b.x1) - max(a.x0, b.x0)) * max(0, min(a.y1, b.y1) - max(a.y0, b.y0))
 
     for row, label in zip(data.itertuples(), _point_labels(data)):
-        color = colors[row.group]
+        color = colors[getattr(row, "color_label", row.group)]
         text = ax.annotate(label, (getattr(row, x), getattr(row, y)), xytext=(0, 11),
                            textcoords="offset points", ha="center", va="center", fontsize=7,
-                           style="italic", color=tuple(c * .7 for c in color[:3]), zorder=5)
+                           style="italic", color=color, zorder=5)
         best = None
         for offset in offsets:
             text.set_position(offset)
@@ -146,11 +162,12 @@ def scatter_plots(data, outdir):
     from matplotlib.lines import Line2D
     from matplotlib.ticker import MaxNLocator
 
-    from .plots import GRID, INK, MUTED, _save, plt
+    from .plots import INK, MUTED, _save, plt
 
-    groups = sorted(data.group.unique())
-    cmap = plt.get_cmap("tab20" if len(groups) <= 20 else "turbo")
-    colors = {g: cmap(i if len(groups) <= 20 else i / max(1, len(groups) - 1)) for i, g in enumerate(groups)}
+    groups = sorted(data["color_label" if "color_label" in data else "group"].unique())
+    colors = _group_colors(data)
+    color_by = str(data.color_by.iloc[0]) if "color_by" in data and len(data) else "group"
+    color_title = "Species" if color_by == "species" else "Group"
     gene = str(data.highlight_gene.iloc[0]) if len(data) else ""
     mode = str(data.gene_count_mode.iloc[0]) if len(data) else "total"
     ylabel = "Counted gene copies (including IR copies)" if mode == "total" else "Unique counted genes"
@@ -160,24 +177,24 @@ def scatter_plots(data, outdir):
         finite = np.isfinite(data[x].astype(float)) & np.isfinite(data[y].astype(float))
         points = data.loc[finite]
         fit = fit_regression(data[x], data[y])
-        height = max(7.2, 3.2 + .22 * len(groups) + (1 if gene else 0))
-        fig, ax = plt.subplots(figsize=(14, height))
+        height = max(8.2, 3.0 + .25 * len(groups) + (1 if gene else 0))
+        fig, ax = plt.subplots(figsize=(13, height))
         fig.subplots_adjust(left=.08, right=.73, bottom=.15, top=.86)
         ax.set_axisbelow(True)
-        ax.grid(color=GRID, lw=.55)
+        ax.grid(color="#f0f0f0", lw=.65)
         if fit.summary["status"] == "ok":
-            ax.fill_between(fit.x, fit.lower, fit.upper, color="#aeb4bc", alpha=.20, lw=0, zorder=1)
-            ax.plot(fit.x, fit.mean, color="#666b73", lw=1.15, ls=(0, (4, 4)), zorder=2)
+            ax.fill_between(fit.x, fit.lower, fit.upper, color="#bdbdbd", alpha=.20, lw=0, zorder=1)
+            ax.plot(fit.x, fit.mean, color="#666666", lw=1.0, ls=(0, (4, 4)), zorder=2)
         for row in points.itertuples():
             absent = bool(gene) and row.highlight_copies == 0
             ax.scatter(getattr(row, x), getattr(row, y), marker="^" if absent else "o", s=46,
-                       color=colors[row.group], edgecolors="white", linewidths=.35, zorder=3)
+                       color=colors[getattr(row, "color_label", row.group)], edgecolors="white", linewidths=.35, zorder=3)
             if absent:
                 ax.scatter(getattr(row, x), getattr(row, y), marker="o", s=110, facecolors="none",
-                           edgecolors="#c43a35", linewidths=1.7, zorder=4)
+                           edgecolors="#c0392b", linewidths=1.7, zorder=4)
             if row.marked:
                 ax.scatter(getattr(row, x), getattr(row, y), marker="s", s=150, facecolors="none",
-                           edgecolors="#e6862b", linewidths=1.7, zorder=4)
+                           edgecolors="#e67e22", linewidths=1.7, zorder=4)
         ax.margins(x=.10, y=.18)
         ax.set_xlabel(axes_labels[x], fontsize=10, fontweight="bold")
         ax.set_ylabel(axes_labels[y], fontsize=10, fontweight="bold")
@@ -195,7 +212,7 @@ def scatter_plots(data, outdir):
         if points.empty:
             ax.text(.5, .5, "No paired data available", transform=ax.transAxes, ha="center", color=MUTED)
         group_legend = ax.legend(handles=[Line2D([], [], marker="o", ls="", color=colors[g], label=g) for g in groups],
-                                 title="Group", loc="upper left", bbox_to_anchor=(1.025, 1),
+                                 title=color_title, loc="upper left", bbox_to_anchor=(1.025, 1),
                                  frameon=False, fontsize=8, title_fontsize=9)
         ax.add_artist(group_legend)
         fig.canvas.draw()
@@ -203,23 +220,25 @@ def scatter_plots(data, outdir):
         special = []
         if gene:
             special += [Line2D([], [], marker="o", ls="", color=INK, label=f"{gene}: counted copy"),
-                        Line2D([], [], marker="^", ls="", color=INK, label=f"{gene}: no counted copy"),
-                        Line2D([], [], marker="o", ls="", markerfacecolor="none", markeredgecolor="#c43a35",
-                               markeredgewidth=1.5, markersize=9, label="No counted copy (ring)")]
-        if data.marked.any():
+                        Line2D([], [], marker="^", ls="", color=INK, label=f"{gene}: no counted copy")]
+        elif data.marked.any():
             special.append(Line2D([], [], marker="s", ls="", markerfacecolor="none", markeredgecolor="#e6862b",
                                   markeredgewidth=1.5, markersize=9, label="Selected genomes"))
         if special:
             ax.legend(handles=special, loc="upper left", bbox_to_anchor=(1.025, bottom), frameon=False,
-                      title="Highlights", fontsize=8, title_fontsize=9)
+                      title=f"{gene} status" if gene else "Selection", fontsize=8, title_fontsize=9)
         _place_labels(ax, points, x, y, colors, [stat_text.get_window_extent(fig.canvas.get_renderer())])
         fig.text(.08, .95, title, fontsize=13, fontweight="bold", color=INK, va="top")
-        subtitle = f"Colour: group; red rings: no counted {gene} copy" if gene else "Colour: group"
+        colour_description = "Uniform taxon colour" if color_by == "none" else f"Colour: {color_title.lower()}"
+        subtitle = f"{colour_description}; red rings: no counted {gene} copy" if gene else colour_description
         if data.marked.any():
             subtitle += "; orange squares: selected genomes"
         fig.text(.08, .91, subtitle, fontsize=9, color=MUTED, va="top")
-        fig.text(.08, .045, "Dashed: OLS regression; shading: pointwise 95% confidence interval for the mean response.\n"
-                 "Pearson p is nominal, with no phylogenetic correction. Gene status follows the current annotation filters.",
+        footnote = ("Dashed: OLS regression; shading: pointwise 95% confidence interval for the mean response.\n"
+                    "Pearson p is nominal, with no phylogenetic correction.")
+        if gene:
+            footnote += " Gene status follows the current annotation filters."
+        fig.text(.08, .045, footnote,
                  fontsize=7.5, color=MUTED)
         figures[name] = _save(fig, outdir / name)
     return figures

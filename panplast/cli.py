@@ -25,6 +25,7 @@ from .ir import REGIONS, detect_quadripartite, from_annotation
 from .reconcile import reconcile_trna_names
 from .phylogeny import build_overlay, load_tip_map, plot_overlay
 from .correlations import correlation_results, scatter_data, scatter_plots
+from .styling import taxon_styles
 
 GB_EXT = (".gb", ".gbk", ".genbank", ".gbff")
 FA_EXT = (".fa", ".fasta", ".fas", ".fna")
@@ -39,7 +40,11 @@ def parse_args(argv=None):
     io.add_argument("--fasta", nargs="*", default=[], metavar="PATH",
                     help="FASTA files or folders; genomes without a GenBank are annotated")
     io.add_argument("--meta", metavar="TSV",
-                    help="table with columns accession (or file), species, optional group/subtribe")
+                    help="optional TSV: accession/file, species, optional group/subtribe/section and color")
+    io.add_argument("--color-by", choices=["species", "group", "none"], default="group",
+                    help="same taxon colours in figures and tree: by species, metadata group, or uniform [group]")
+    io.add_argument("--label-by", choices=["species", "accession"], default="species",
+                    help="figure and tree labels: species names or genome IDs [species]")
     io.add_argument("--out", default="panplast_results", metavar="DIR", help="output folder [panplast_results]")
 
     an = p.add_argument_group("annotation of FASTA")
@@ -67,8 +72,8 @@ def parse_args(argv=None):
     sc = p.add_argument_group("genome correlations")
     sc.add_argument("--gene-count", choices=["total", "unique"], default="total",
                     help="scatterplot gene counts: total counted copies including IR, or unique names [total]")
-    sc.add_argument("--highlight-gene", default="ycf2", metavar="GENE",
-                    help="highlight genomes without a counted copy of this gene [ycf2]; 'none' disables it")
+    sc.add_argument("--highlight-gene", default="none", metavar="GENE",
+                    help="optional gene-status markers; disabled by default [none]")
     sc.add_argument("--highlight-genomes", default="", metavar="LIST",
                     help="comma-separated exact genome IDs to mark with orange squares")
     tr = p.add_argument_group("phylogeny and missing genes")
@@ -125,7 +130,9 @@ def load_meta(path):
             row = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
             key = row.get("accession") or accession_of(row.get("file", "")) or row.get("file")
             if key:
-                meta[key] = dict(species=row.get("species", ""), group=row.get("group") or row.get("subtribe") or "")
+                meta[key] = dict(species=row.get("species", ""),
+                                 group=row.get("group") or row.get("subtribe") or row.get("section") or "",
+                                 color=row.get("color", ""))
     return meta
 
 
@@ -194,8 +201,16 @@ def main(argv=None):
     for gid, m in meta.items():
         if gid in records and m.get("species"):
             labels[gid] = m["species"]
+    for gid in records:
+        labels[gid] = labels.get(gid) or gid
     groups = {gid: meta.get(gid, {}).get("group", "") for gid in records}
     order = sorted(records, key=lambda g: (groups.get(g, ""), labels.get(g, g)))
+    try:
+        styles = taxon_styles(order, labels, groups, meta, a.color_by, a.label_by)
+    except ValueError as exc:
+        sys.exit(f"Metadata: {exc}")
+    plot_labels = dict(zip(styles.genome, styles.display_label))
+    plot_colors = dict(zip(styles.genome, styles.color))
     highlighted = {g.strip() for g in a.highlight_genomes.split(",") if g.strip()}
     if highlighted - set(records):
         sys.exit("Unknown --highlight-genomes IDs: " + ", ".join(sorted(highlighted - set(records))))
@@ -289,11 +304,13 @@ def main(argv=None):
         "summary": summary, "categories": cats, "matrix": matrix_out.reset_index(names="gene"),
         "junction_genes": junctions, "region_coords": coords, "genes_all": genes_tab, "qc": qc,
         "trna_renamed": renames,
+        "taxon_styles": styles,
     }
     highlight_gene = a.highlight_gene.strip()
     highlight_gene = None if highlight_gene.lower() == "none" else syn.get(highlight_gene, highlight_gene)
     try:
-        scatter_points = scatter_data(summary, matrix, a.gene_count, highlight_gene, highlighted, loci_by)
+        scatter_points = scatter_data(summary, matrix, a.gene_count, highlight_gene, highlighted, loci_by,
+                                      styles=styles)
     except ValueError as exc:
         sys.exit(f"Scatterplot input: {exc}")
     tables.update(scatter_points=scatter_points, correlations=correlation_results(scatter_points))
@@ -304,7 +321,7 @@ def main(argv=None):
             selected_genes = [g.strip() for g in a.tree_genes.split(",") if g.strip()] if a.tree_genes else None
             tree_taxa, tree_absences, tree_copies = [], [], []
             for i, path in enumerate(a.tree, 1):
-                overlay = build_overlay(path, matrix, labels, groups, tip_map, selected_genes, loci_by)
+                overlay = build_overlay(path, matrix, labels, groups, tip_map, selected_genes, loci_by, styles=styles)
                 tree_id = f"{i}: {Path(path).name}"
                 copy_rows = overlay.copies.rename_axis("tip").reset_index().melt(
                     id_vars="tip", var_name="gene", value_name="copies")
@@ -330,12 +347,16 @@ def main(argv=None):
 
     # ---------------------------------------------------------------- figures
     figs = {}
-    figs["junctions"] = plots.junction_plot(order, labels, quads, jrows, out / "figures" / "ir_junctions", a.window)
-    figs["regions"] = plots.region_lengths_plot(order, labels, summary, out / "figures" / "region_lengths")
+    figs["junctions"] = plots.junction_plot(order, plot_labels, quads, jrows, out / "figures" / "ir_junctions",
+                                           a.window, taxon_colors=plot_colors)
+    figs["regions"] = plots.region_lengths_plot(order, plot_labels, summary, out / "figures" / "region_lengths",
+                                               taxon_colors=plot_colors)
     figs["pangenome"] = plots.pangenome_plot(cats, matrix, rare_core, rare_pan, out / "figures" / "core_softcore",
                                              (a.core, a.soft_core, a.shell))
-    figs["heatmap"] = plots.gene_heatmap(matrix, cats, order, labels, out / "figures" / "gene_matrix")
-    figs["heatmap_var"] = plots.gene_heatmap(matrix, cats, order, labels, out / "figures" / "gene_matrix_variable", True)
+    figs["heatmap"] = plots.gene_heatmap(matrix, cats, order, plot_labels, out / "figures" / "gene_matrix",
+                                         taxon_colors=plot_colors)
+    figs["heatmap_var"] = plots.gene_heatmap(matrix, cats, order, plot_labels,
+                                             out / "figures" / "gene_matrix_variable", True, taxon_colors=plot_colors)
     for key, figure in scatter_plots(scatter_points, out / "figures").items():
         figs[f"correlation_{key}"] = figure
     for i, overlay in enumerate(tree_overlays, 1):
@@ -347,8 +368,8 @@ def main(argv=None):
         (out / "figures" / "maps").mkdir(exist_ok=True)
         for g in order[:nmaps]:
             safe = re.sub(r"[^\w.-]+", "_", f"{g}_{labels[g]}")
-            maps.append((g, plots.circular_map(g, labels[g], seqs[g], loci_by[g], quads[g],
-                                               out / "figures" / "maps" / safe)))
+            maps.append((g, plots.circular_map(g, plot_labels[g], seqs[g], loci_by[g], quads[g],
+                                               out / "figures" / "maps" / safe, taxon_colors=plot_colors)))
     log(t("log_figs", p=out / "figures"))
 
     report.write_report(out / "report.html", summary, cats, junctions, qc, renames, figs, maps, labels,
@@ -366,7 +387,7 @@ def write_excel(path, tables):
              "junction_genes": t("sh_junction"), "region_coords": t("sh_coords"),
              "genes_all": t("sh_genes"), "qc": t("sh_qc"), "trna_renamed": t("sh_renamed"),
              "tree_taxa": "Tree taxa", "tree_absences": "Tree absences", "tree_copies": "Tree gene copies",
-             "scatter_points": "Scatterplot data", "correlations": "Correlations"}
+             "scatter_points": "Scatterplot data", "correlations": "Correlations", "taxon_styles": "Taxon colours"}
     fills = {"core": "D6E6EC", "soft-core": "E3F1F6", "shell": "F7EBD0", "cloud": "ECEDEF"}
     with pd.ExcelWriter(path, engine="openpyxl") as xw:
         for k, df in tables.items():

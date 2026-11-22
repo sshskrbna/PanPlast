@@ -17,6 +17,7 @@ from Bio import Phylo
 from Bio.Phylo.NewickIO import NewickError
 
 from .genes import EXPECTED_CDS_LEN, PLASTID_TRNAS, accession_of
+from .styling import taxon_styles
 
 
 @dataclass
@@ -126,9 +127,14 @@ def match_taxa(tree, matrix, labels, groups=None, tip_map=None):
     return pd.DataFrame(rows)
 
 
-def build_overlay(path, matrix, labels, groups=None, tip_map=None, genes=None, loci_by=None):
+def build_overlay(path, matrix, labels, groups=None, tip_map=None, genes=None, loci_by=None, styles=None):
     tree = read_tree(path)
     taxa = match_taxa(tree, matrix, labels, groups, tip_map)
+    if styles is None:
+        styles = taxon_styles(matrix.columns, labels, groups)
+    style_index = styles.set_index("genome")
+    for column in ("color_by", "color_label", "color", "label_by", "display_label"):
+        taxa[column] = taxa.genome.map(style_index[column]).fillna("")
     matched = taxa[taxa.status == "matched"]
     if genes is None:
         # Select observed pan-genes missing in at least one matched genome.
@@ -169,7 +175,14 @@ def plot_overlay(overlay, summary, path_base, genes_per_page=30):
         raise ValueError("genes_per_page must be positive")
     tree = overlay.tree
     tips = tree.get_terminals()
-    by_tip = overlay.taxa[overlay.taxa.tip != ""].set_index("tip")
+    taxa = overlay.taxa.copy()
+    if "color" not in taxa:
+        matched_taxa = taxa[taxa.genome != ""].drop_duplicates("genome")
+        styles = taxon_styles(matched_taxa.genome, dict(zip(matched_taxa.genome, matched_taxa.species)),
+                              dict(zip(matched_taxa.genome, matched_taxa.group))).set_index("genome")
+        for column in ("color_by", "color_label", "color", "label_by", "display_label"):
+            taxa[column] = taxa.genome.map(styles[column]).fillna("")
+    by_tip = taxa[taxa.tip != ""].set_index("tip")
     n = len(tips)
     y = {tip: i for i, tip in enumerate(tips)}
     for node in tree.get_nonterminals(order="postorder"):
@@ -182,22 +195,26 @@ def plot_overlay(overlay, summary, path_base, genes_per_page=30):
         for child in node.clades:
             x[child] = x[node] + (child.branch_length if use_lengths else 1)
     xmax = max(x.values()) or 1
-    groups = sorted(set(overlay.taxa.loc[overlay.taxa.status == "matched", "group"]) - {""})
-    palette = plt.get_cmap("tab20")
-    group_colors = {group: palette(i % 20) for i, group in enumerate(groups)}
+    matched_taxa = taxa[taxa.status == "matched"]
+    groups = sorted(set(matched_taxa.color_label) - {""})
+    group_colors = dict(zip(matched_taxa.color_label, matched_taxa.color))
+    color_by = matched_taxa.color_by.iloc[0]
+    if color_by == "none":
+        groups = []
+    legend_columns = 3 if color_by == "species" else 5
     stats = summary.set_index("genome")
     tip_labels = []
     for tip in tips:
         row = by_tip.loc[tip.name]
-        label = f"{row.species or row.genome} ({row.genome})" if row.genome else f"{tip.name} [no data]"
-        if row.species == row.genome or not row.species:
+        label = f"{row.display_label or row.genome} ({row.genome})" if row.genome else f"{tip.name} [no data]"
+        if row.display_label == row.genome or not row.display_label:
             label = row.genome or f"{tip.name} [no data]"
         tip_labels.append(label)
     label_width = max(2.6, max(map(len, tip_labels)) * 0.052 + 0.6)
     genes = list(overlay.copies.columns)
     pages = [genes[i:i + genes_per_page] for i in range(0, len(genes), genes_per_page)] or [[]]
     results = []
-    legend_rows = math.ceil(len(groups) / 5)
+    legend_rows = math.ceil(len(groups) / legend_columns)
     for page_idx, page in enumerate(pages, 1):
         widths = [3.0, label_width, 1.05, 1.05, max(2.0, 0.29 * len(page))]
         height = max(4.8, n * 0.25 + 2.1 + legend_rows * 0.22)
@@ -223,11 +240,8 @@ def plot_overlay(overlay, summary, path_base, genes_per_page=30):
                                  fontsize=5, ha="right", color=MUTED)
         for i, tip in enumerate(tips):
             row = by_tip.loc[tip.name]
-            color = group_colors.get(row.group, INK) if row.genome else "#aeb4bc"
-            # Pastel group colours are suitable for markers but too faint for text.
-            label_color = tuple(c * 0.65 for c in color[:3]) if row.genome and row.group in group_colors else INK
-            if not row.genome:
-                label_color = "#737b86"
+            color = row.color or INK if row.genome else "#aeb4bc"
+            label_color = color if row.genome else "#737b86"
             ax_tree.plot([x[tip], xmax * 1.025], [i, i], color="#d8dce2", lw=0.5, ls=":")
             ax_tree.scatter([x[tip]], [i], s=9, color=color, zorder=3)
             ax_labels.text(0, i, tip_labels[i], color=label_color, va="center", fontsize=7, style="italic")
@@ -283,7 +297,8 @@ def plot_overlay(overlay, summary, path_base, genes_per_page=30):
                    ncol=4, frameon=False, fontsize=7)
         if groups:
             fig.legend(handles=[Patch(color=group_colors[g], label=g) for g in groups],
-                       loc="lower left", bbox_to_anchor=(0.03, 0.3 / height), ncol=5, frameon=False, fontsize=6)
+                       loc="lower left", bbox_to_anchor=(0.03, 0.3 / height), ncol=legend_columns,
+                       frameon=False, fontsize=6)
         fig.text(0.035, 0.13 / height,
                  "Absence can reflect incomplete annotation or assembly; ancestral loss events are not inferred.",
                  fontsize=6.5, color=MUTED)

@@ -156,15 +156,16 @@ def _correlation_section(figs, root):
                       'only paired finite values enter each fit.<br><span class="dl">'
                       f'Download: {_links(figure, root)}</span></figcaption></figure>')
     return ('<section id="correlations"><h2>Genome correlation plots</h2>'
-            '<p class="note">Colours: metadata groups. Triangles and red rings: no counted copy '
-            'of the highlighted gene under the current annotation filters. Orange squares: '
-            'user-selected genomes; they do not automatically diagnose IR collapse. '
+            '<p class="note">Each point represents one plastome. Taxon colours follow the selected '
+            'species/group mode; the same colour key is used for figures and tree tips. '
+            'Ordinary plots show gene counts against lengths without gene-status markers. '
             'Dashed lines show ordinary least-squares fits with pointwise 95% confidence '
             'intervals for the mean response. Pearson p-values are nominal, without '
             'phylogenetic correction. Plastome length includes both IR copies, so its '
             'relationship with IR length partly reflects shared components.</p>' + "".join(blocks) +
             '<p class="dl">TSV: <a href="tables/correlations.tsv">regression statistics</a> · '
-            '<a href="tables/scatter_points.tsv">plotted data</a></p></section>')
+            '<a href="tables/scatter_points.tsv">plotted data</a> · '
+            '<a href="tables/taxon_styles.tsv">taxon colours and labels</a></p></section>')
 
 
 def write_correlation_page(path, figs, root, report_name="report.html"):

@@ -47,7 +47,7 @@ def _italic_label(species: str, gid: str) -> str:
 
 
 # --------------------------------------------------------------------------- junctions
-def junction_plot(order, labels, quads, jrows, path_base, window=1200):
+def junction_plot(order, labels, quads, jrows, path_base, window=1200, taxon_colors=None):
     n = len(order)
     row_h = 0.62
     fig_h = 0.9 + n * row_h
@@ -80,7 +80,8 @@ def junction_plot(order, labels, quads, jrows, path_base, window=1200):
     for i, g in enumerate(order):
         q = quads.get(g)
         sp = labels.get(g, g)
-        lab_ax.text(0.0, i - 0.12, sp, ha="left", va="center", fontsize=8, style="italic", color=INK)
+        lab_ax.text(0.0, i - 0.12, sp, ha="left", va="center", fontsize=8, style="italic",
+                    color=(taxon_colors or {}).get(g, INK))
         if q:
             txt = (f"{g} · {q.length:,} bp · LSC {q.region_len('LSC'):,} · "
                    f"IR {q.region_len('IRb'):,} · SSC {q.region_len('SSC'):,}").replace(",", " ")
@@ -139,7 +140,7 @@ def junction_plot(order, labels, quads, jrows, path_base, window=1200):
 
 
 # --------------------------------------------------------------------------- regions
-def region_lengths_plot(order, labels, summary, path_base):
+def region_lengths_plot(order, labels, summary, path_base, taxon_colors=None):
     df = summary.set_index("genome").loc[order]
     n = len(order)
     fig, ax = plt.subplots(figsize=(10, 0.9 + 0.22 * n))
@@ -150,6 +151,8 @@ def region_lengths_plot(order, labels, summary, path_base):
                 height=0.72, label=r if r != "IRa" else None)
         left += vals
     ax.set_yticks(range(n), [labels.get(g, g) for g in order], fontsize=7, style="italic")
+    for label, genome in zip(ax.get_yticklabels(), order):
+        label.set_color((taxon_colors or {}).get(genome, INK))
     ax.invert_yaxis()
     ax.set_xlabel(t("f_length_bp"))
     ax.xaxis.grid(True, color=GRID, lw=0.6)
@@ -162,7 +165,7 @@ def region_lengths_plot(order, labels, summary, path_base):
 
 
 # --------------------------------------------------------------------------- gene matrix
-def gene_heatmap(matrix, cats, order, labels, path_base, only_variable=False):
+def gene_heatmap(matrix, cats, order, labels, path_base, only_variable=False, taxon_colors=None):
     cat_of = dict(zip(cats.gene, cats.category.astype(str)))
     genes = [g for g in cats.gene if not only_variable or matrix.loc[g, order].nunique() > 1]
     if not genes:
@@ -176,6 +179,8 @@ def gene_heatmap(matrix, cats, order, labels, path_base, only_variable=False):
     cmap = ListedColormap(["#f1f2f4", "#8fbcd4", "#2f6f95", "#163c57"])
     ax.imshow(m, aspect="auto", cmap=cmap, norm=BoundaryNorm([-.5, .5, 1.5, 2.5, 3.5], 4), interpolation="nearest")
     ax.set_xticks(range(nS), [labels.get(g, g) for g in order], rotation=90, fontsize=6, style="italic")
+    for label, genome in zip(ax.get_xticklabels(), order):
+        label.set_color((taxon_colors or {}).get(genome, INK))
     ax.set_yticks(range(nG), genes, fontsize=6, style="italic")
     ax.set_xticks(np.arange(-.5, nS), minor=True)
     ax.set_yticks(np.arange(-.5, nG), minor=True)
@@ -257,7 +262,7 @@ def pangenome_plot(cats, matrix, rare_core, rare_pan, path_base, thresholds):
 
 
 # --------------------------------------------------------------------------- circular map
-def circular_map(gid, label, seq, loci, q, path_base, formats=("png", "pdf")):
+def circular_map(gid, label, seq, loci, q, path_base, formats=("png", "pdf"), taxon_colors=None):
     L = len(seq)
     fig = plt.figure(figsize=(9, 9))
     ax = fig.add_axes([0, 0, 1, 1])
@@ -324,7 +329,8 @@ def circular_map(gid, label, seq, loci, q, path_base, formats=("png", "pdf")):
             th = math.radians(ang(midp))
             ax.text((rq - 0.07) * math.cos(th), (rq - 0.07) * math.sin(th), reg, ha="center", va="center",
                     fontsize=8, fontweight="bold", color=REGION_COLORS[reg])
-    ax.text(0, 0.07, label, ha="center", va="center", fontsize=11, style="italic", color=INK)
+    ax.text(0, 0.07, label, ha="center", va="center", fontsize=11, style="italic",
+            color=(taxon_colors or {}).get(gid, INK))
     ax.text(0, -0.02, gid, ha="center", va="center", fontsize=8, color=MUTED)
     gc_total = 100 * (seq.upper().count("G") + seq.upper().count("C")) / max(1, sum(seq.upper().count(c) for c in "ACGT"))
     ax.text(0, -0.1, f"{L:,} {t('f_bp')} · GC {gc_total:.1f} %".replace(",", " "), ha="center", va="center", fontsize=8, color=MUTED)

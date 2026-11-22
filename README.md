@@ -200,6 +200,7 @@ results/
 | `genes_all` | locus | final name, name in the GenBank, flags (fragment, partial, renamed, ...), candidate names, annotators |
 | `qc` | issue | level and description |
 | `trna_renamed` | tRNA | old and new name, identity and coverage of the homolog |
+| `taxon_styles` / `Taxon colours` | genome | resolved species label, group, colour category, exact colour and figure label |
 | `scatter_points` / `Scatterplot data` | genome | plotted genome / IR sizes, gene count and count mode, group, highlighted gene copy number and selected-genome marker |
 | `correlations` / `Correlations` | comparison | valid pairs, excluded rows, Pearson r, two-sided p, OLS slope / intercept, confidence level and fit status |
 | `tree_taxa` / `Tree taxa` | tree × taxon | matched genome ID, species, group, matching method, unmatched tips and genomes outside the tree |
@@ -278,7 +279,7 @@ Inputs can be mixed. Files are matched to genomes by accession, found in the fil
 |---|---|---|
 | `--genbank` | annotated GenBank files or folders (`.gb`, `.gbk`, `.genbank`, `.gbff`) | GeSeq `*_GenBank.gb`, PGA output, NCBI records. GeSeq `/info` evidence is used to resolve names. |
 | `--fasta` | FASTA files or folders, one genome per file | Used only for labels when a GenBank of the same accession is given; otherwise annotated. |
-| `--meta` | TSV with `accession` (or `file`), `species`, optional `group` / `subtribe` | Sets species labels and the order of genomes (by group, then species). |
+| `--meta` | Optional TSV with `accession` (or `file`), `species`, optional `group` / `subtribe` / `section` and `color` | Overrides automatic species labels and supplies user colours. |
 | `--tree` | one or more `.treefile`, `.contree`, Newick or `.iqtree` files | Adds gene-content overlays to existing phylogenies. |
 | `--tree-map` | TSV with `tip`, `genome` | Links tree labels to exact PanPlast genome IDs when automatic matching is insufficient. |
 
@@ -291,13 +292,48 @@ PP316507.1	Agrostis alpina	Agrostidinae
 Without `--meta`, labels come from the `ORGANISM` line or the file name: `MN551181.1_Poa_poophagorum.fasta` becomes
 *Poa poophagorum*.
 
+### Metadata, species colours and labels
+
+Metadata are optional. The same colour key is used for scatterplot points, tree tips and taxon labels
+in the other figures. Region bars and gene-copy heatmap cells retain their own biological colour scales.
+
+```bash
+# Species names and optional custom colours from metadata:
+panplast --genbank gb/ --meta metadata.tsv --color-by species \
+  --tree phylogeny.contree --out results/
+
+# No metadata: names come from GenBank/FASTA; colours are assigned automatically:
+panplast --genbank gb/ --color-by species --tree phylogeny.contree --out results/
+
+# Show accession IDs instead of species names in the figures:
+panplast --genbank gb/ --color-by species --label-by accession --out results_ids/
+```
+
+| Flag | Effect |
+|---|---|
+| `--color-by species` | One colour per resolved species name; assemblies of the same species share a colour. |
+| `--color-by group` | One colour per metadata group / subtribe / section (default). Without groups, use neutral grey. |
+| `--color-by none` | A uniform taxon colour. |
+| `--label-by species` | Species labels in figures (default); use the genome ID when no name is available. |
+| `--label-by accession` | Genome IDs in figures; species names remain available for tree matching and tables. |
+
+A minimal metadata file needs only `accession` and `species`. Add `color` to assign exact colours,
+and optionally `group`, `subtribe` or `section`. See [the template](examples/taxon_metadata.tsv).
+Use one colour per **selected category**: the same species must have one colour in species mode;
+all genomes in a group must share a colour in group mode. Conflicting assignments fail with a diagnostic.
+The resolved key is saved in `tables/taxon_styles.tsv` and the Excel sheet `Taxon colours`.
+Unmatched tree tips stay grey. Colours are assigned from the full input dataset, so a tree containing
+only a subset of those genomes keeps the same colours as the scatterplots.
+
 ### Options
 
 ```
 input / output
   --genbank PATH ...     annotated GenBank files or folders
   --fasta PATH ...       FASTA files or folders (annotated if they have no GenBank)
-  --meta TSV             accession/file, species, optional group/subtribe
+  --meta TSV             optional accession/file, species, group/subtribe/section, color
+  --color-by {species,group,none}  colour points, tree tips and taxon labels [group]
+  --label-by {species,accession}   figure labels [species]
   --out DIR              output folder [panplast_results]
 
 annotation of FASTA
@@ -321,7 +357,7 @@ boundaries and figures
 
 genome correlations
   --gene-count {total,unique}  counted copies including IR, or unique gene names [total]
-  --highlight-gene GENE       ring genomes without a counted copy [ycf2]; 'none' disables
+  --highlight-gene GENE       optional gene-status markers [none; disabled]
   --highlight-genomes LIST    exact genome IDs to mark with orange squares
 
 phylogeny and missing genes
@@ -345,24 +381,38 @@ immediately after the summary in `report.html`, with a prominent link at the top
 
 ```bash
 panplast --genbank gb/ --meta metadata.tsv --out results/ \
-  --gene-count total --highlight-gene ycf2
+  --gene-count total --color-by species
 
-# Count unique gene names instead of copies, and mark a selected genome:
+# Count unique gene names instead of copies:
 panplast --genbank gb/ --meta metadata.tsv --out results_unique/ \
-  --gene-count unique --highlight-gene infA --highlight-genomes NC_000001.1
+  --gene-count unique --color-by group
 ```
 
-Colours follow `group` / `subtribe` in `--meta`; labels use species names, with accessions added when
-abbreviated labels repeat. Without metadata groups, all genomes share an `Ungrouped` colour.
+Colours follow `--color-by`; labels use `--label-by`, with accessions added when
+abbreviated labels repeat. Points and species labels use the same saturated colour. The default palette
+uses vivid blues, reds, greens, purples and oranges; ungrouped genomes use a neutral grey.
+To keep exact group colours across datasets, add an optional `color` column to the metadata:
+
+```tsv
+accession	species	group	color
+NC_000001.1	Species alpha	Group A	#4363d8
+NC_000002.1	Species beta	Group B	#00a040
+```
+
+Use one valid Matplotlib colour (for example a hex value) per selected species or group. The chosen
+colours are saved in `taxon_styles.tsv` and in `scatter_points.tsv`. The colour legend explains the
+species/group categories; by default all points are circles, with no gene-status legend.
+
 Gene counts are calculated from the presence / copy matrix: `total` sums counted copies including IR
 copies; `unique` counts distinct names with at least one counted copy. Fragments and other uncounted
 loci follow the same filters as the main analysis.
 
-For `--highlight-gene` (default `ycf2`), circles indicate a counted copy and triangles with red rings
-indicate no counted copy. This can reflect incomplete annotation, fragments, pseudogenes or exclusions,
-not necessarily a biological gene loss. Use `--highlight-gene none` to disable gene-status markers.
-Orange squares mark only the exact IDs listed in `--highlight-genomes`; the program does not infer
-IR collapse from that selection. Duplicate species labels remain separate genomes.
+Gene-status highlighting is **off by default**: ordinary plots show only the distribution of gene
+counts and lengths. If explicitly requested with, for example, `--highlight-gene infA`, circles
+indicate a counted copy and triangles with red rings indicate no counted copy under the current filters.
+Optional orange squares mark only IDs explicitly listed in `--highlight-genomes`; the program does
+not infer IR collapse from that selection. Different assemblies remain separate points even when
+their species names and colours match.
 
 The dashed line is an ordinary least-squares fit; shading is the pointwise 95% confidence interval
 for its **mean response**, not a prediction interval for individual genomes. Pearson `r`, nominal
@@ -419,7 +469,8 @@ Each tree tip must map to at most one genome, and each genome to at most one tip
 
 Each tree produces PNG, PDF and SVG figures in `figures/phylogeny_<number>.*`, a section in the HTML
 report, and three tables / Excel sheets: taxon matching, absences and copy numbers. More than 30
-displayed genes are split across figure pages. Group colours come from `--meta`; bars show IRb and
+displayed genes are split across figure pages. Taxon colours follow `--color-by`, with optional values
+from `--meta`; bars show IRb and
 total genome lengths. Unmatched tips remain in the tree with grey cells (unknown gene content).
 Input genomes outside the tree still contribute to the main pan-genome statistics.
 
@@ -430,7 +481,7 @@ Input genomes outside the tree still contribute to the main pan-genome statistic
 | Dark blue cell | Two or more counted copies; exact values are in `tree_copies.tsv` |
 | Grey cell | No matching input genome; gene content is unknown |
 | Orange / green bars | IRb length / total genome length, in kb |
-| Coloured tip markers and labels | Groups supplied through `--meta` |
+| Coloured tip markers and labels | The same species/group colour key as the other figures, selected with `--color-by` |
 
 In `tree_taxa.tsv`, `matched` identifies a linked tip, `unmatched_tip` identifies an unlinked tree
 tip, and `genome_not_in_tree` identifies an input genome without a matching tip. In
@@ -595,6 +646,7 @@ panplast/
 ├── analysis.py    junction genes, summaries, categories, accumulation curves
 ├── plots.py       junction, pan-genome and circular-map figures
 ├── correlations.py  genome / IR / gene-count regressions and scatterplots
+├── styling.py     shared species/group colours and figure labels
 ├── phylogeny.py   IQ-TREE input, taxon matching and gene-content tree figures
 ├── report.py      HTML report
 └── text.py        user-facing strings

@@ -12,7 +12,7 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from panplast.cli import main
+from panplast.cli import load_meta, main
 from panplast.correlations import correlation_results, fit_regression, scatter_data, scatter_plots
 from panplast.genes import Locus
 
@@ -62,7 +62,7 @@ class TestScatterData(unittest.TestCase):
         self.matrix = pd.DataFrame({"g1": [2, 1], "g2": [0, 1], "g3": [1, 1]}, index=["ycf2", "rbcL"])
 
     def test_copy_count_unique_count_and_highlights_are_aligned(self):
-        data = scatter_data(self.summary, self.matrix, highlight_genomes=["g2"])
+        data = scatter_data(self.summary, self.matrix, highlight_gene="ycf2", highlight_genomes=["g2"])
         self.assertEqual(list(data.gene_count), [1, 3, 2])
         self.assertEqual(list(data.highlight_copies), [0, 2, 1])
         self.assertEqual(list(data.marked), [True, False, False])
@@ -70,6 +70,31 @@ class TestScatterData(unittest.TestCase):
         self.assertEqual(list(unique.gene_count), [1, 2, 2])
         self.assertEqual(data.loc[0, "genome_kb"], 120)
         self.assertTrue(pd.isna(data.loc[1, "ir_kb"]))
+
+    def test_default_plots_have_no_gene_status_markers_or_legend(self):
+        from panplast.cli import parse_args
+        from panplast.plots import plt
+        self.assertEqual(parse_args([]).highlight_gene, "none")
+        data = scatter_data(self.summary.fillna({"IRb_bp": 10000}), self.matrix)
+        self.assertTrue((data.highlight_gene == "").all())
+        figures = []
+        def capture(fig, path):
+            figures.append(fig)
+            return {"png": str(path) + ".png"}
+        try:
+            with patch("panplast.plots._save", side_effect=capture):
+                scatter_plots(data, Path("unused"))
+            # One CI band and one ordinary marker per genome; no rings or status legend.
+            ax = figures[0].axes[0]
+            self.assertEqual(len(ax.collections), 4)
+            all_text = " ".join(text.get_text() for text in ax.texts + figures[0].texts)
+            self.assertNotIn("ycf", all_text.lower())
+            self.assertNotIn("red rings", all_text)
+            self.assertFalse(any(legend.get_title().get_text().endswith(" status")
+                                 for legend in [ax.get_legend()] if legend))
+        finally:
+            for fig in figures:
+                plt.close(fig)
 
     def test_missing_ir_only_affects_ir_comparisons(self):
         table = correlation_results(scatter_data(self.summary, self.matrix)).set_index("comparison")
@@ -85,13 +110,32 @@ class TestScatterData(unittest.TestCase):
         self.assertTrue(disabled.highlight_copies.isna().all())
 
     def test_invalid_highlight_options_fail(self):
-        for kwargs in (dict(highlight_genomes=["typo"]), dict(highlight_gene="typo"), dict(gene_count="typo")):
+        for kwargs in (dict(highlight_genomes=["typo"]), dict(highlight_gene="typo"), dict(gene_count="typo"),
+                       dict(colors_by_group={"A": "not-a-colour"})):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 scatter_data(self.summary, self.matrix, **kwargs)
 
+    def test_metadata_section_and_custom_colors(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "metadata.tsv"
+            path.write_text("accession\tspecies\tsection\tcolor\ng1\tAlpha a\tA\t#00a040\n")
+            meta = load_meta(path)
+            self.assertEqual(meta["g1"]["group"], "A")
+            self.assertEqual(meta["g1"]["color"], "#00a040")
+        data = scatter_data(self.summary, self.matrix, colors_by_group={"A": "#00a040", "B": "#4363d8"})
+        self.assertEqual(set(data.loc[data.group == "A", "group_color"]), {"#00a040ff"})
+        self.assertEqual(set(data.loc[data.group == "B", "group_color"]), {"#4363d8ff"})
+
+    def test_conflicting_group_colors_are_rejected(self):
+        from panplast.correlations import _group_colors
+        data = pd.DataFrame({"group": ["A", "A"], "group_color": ["#00a040", "#4363d8"]})
+        with self.assertRaisesRegex(ValueError, "Conflicting"):
+            _group_colors(data)
+
     def test_figures_use_calculated_statistics_and_highlight_layers(self):
         from panplast.plots import plt
-        data = scatter_data(self.summary.fillna({"IRb_bp": 10000}), self.matrix, highlight_genomes=["g2"])
+        data = scatter_data(self.summary.fillna({"IRb_bp": 10000}), self.matrix, highlight_gene="ycf2",
+                            highlight_genomes=["g2"])
         figures = []
         def capture(fig, path):
             figures.append(fig)
